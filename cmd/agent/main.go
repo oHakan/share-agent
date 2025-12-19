@@ -229,35 +229,35 @@ func createJobHandler(executor *docker.Executor, log *zap.Logger) client.JobHand
 			return result
 		}
 
-		// Determine the command to run
-		// If script_content is provided, use it with Python -c flag
-		// Otherwise, use the provided command
-		cmd := req.Command
-		if req.ScriptContent != "" {
-			// Execute the script content using Python's -c flag
-			cmd = []string{"python", "-c", req.ScriptContent}
-			log.Info("Executing job with script content",
+		// Validate that we have script content to execute
+		if req.ScriptContent == "" {
+			result.Status = "failed"
+			result.OutputLog = "No script content provided"
+			log.Error("Job failed - no script content",
 				zap.String("job_id", req.JobId),
-				zap.String("image", req.Image),
-				zap.Int("script_length", len(req.ScriptContent)),
 			)
-		} else {
-			log.Info("Executing job",
-				zap.String("job_id", req.JobId),
-				zap.String("image", req.Image),
-				zap.Strings("command", req.Command),
-			)
+			return result
 		}
 
-		// Build container config with resource limits from the job request
+		log.Info("Executing job with in-memory script injection",
+			zap.String("job_id", req.JobId),
+			zap.String("image", req.Image),
+			zap.Int("script_length", len(req.ScriptContent)),
+			zap.Strings("requirements", req.Requirements),
+		)
+
+		// Build container config with resource limits and script content
+		// Script is injected into container via tar archive (zero disk footprint)
 		containerConfig := docker.ContainerConfig{
 			MemoryLimitMB:  req.MemoryLimitMb,     // Memory limit in MB
 			CPULimit:       float64(req.CpuLimit), // CPU limit in cores
 			TimeoutSeconds: req.TimeoutSeconds,    // Execution timeout in seconds
+			Requirements:   req.Requirements,      // Python dependencies to install
+			Script:         req.ScriptContent,     // Script content injected into container
 		}
 
 		// Run the container with log streaming callback and security sandbox
-		output, err := executor.RunContainer(ctx, req.Image, cmd, containerConfig, logSender)
+		output, err := executor.RunContainer(ctx, req.Image, containerConfig, logSender)
 		if err != nil {
 			result.Status = "failed"
 			result.OutputLog = fmt.Sprintf("Execution error: %v", err)

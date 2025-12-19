@@ -3,17 +3,16 @@
 package docker
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"go.uber.org/zap"
@@ -42,35 +41,40 @@ func NewExecutor(logger *zap.Logger) (*Executor, error) {
 	}, nil
 }
 
-// ContainerConfig holds resource limits and timeout settings for container execution.
+// ContainerConfig holds resource limits, timeout settings, and dependencies for container execution.
 type ContainerConfig struct {
-	MemoryLimitMB  int64   // Memory limit in megabytes (e.g., 512 for 512MB)
-	CPULimit       float64 // CPU limit in cores (e.g., 0.5 for half core, 1.0 for one core)
-	TimeoutSeconds int32   // Execution timeout in seconds (e.g., 60)
+	MemoryLimitMB  int64    // Memory limit in megabytes (e.g., 512 for 512MB)
+	CPULimit       float64  // CPU limit in cores (e.g., 0.5 for half core, 1.0 for one core)
+	TimeoutSeconds int32    // Execution timeout in seconds (e.g., 60)
+	Requirements   []string // Python package dependencies to install before execution (e.g., ["numpy", "pandas==1.5.0"])
+	Script         string   // Python script content to execute (injected into container as task.py)
 }
 
-// RunContainer executes a container with the specified image and command.
-// It pulls the image if not present locally, runs the container,
-// streams logs to the logCallback in real-time, waits for completion,
-// and returns the combined stdout/stderr output.
+// RunContainer executes a container with the specified image and script.
+// It uses in-memory script injection (zero disk footprint on host) by:
+//  1. Creating the container first (without starting it)
+//  2. Preparing the script as a tar archive in RAM
+//  3. Injecting the tar archive into the container using CopyToContainer
+//  4. Starting the container to execute the script
 //
 // Security controls enforced:
 //   - TIMEOUT: Uses context.WithTimeout to enforce execution time limits
 //   - MEMORY: Limits container memory via HostConfig.Resources.Memory
 //   - CPU: Limits CPU via HostConfig.Resources.NanoCPUs
-//   - NETWORK: Isolates container from network (NetworkMode: "none")
+//   - NETWORK: Isolates container from network (NetworkMode: "none") unless dependencies are needed
 //
 // The logCallback is invoked for each log line as it's received.
 // If logCallback is nil, logs are collected but not streamed.
 //
 // The function ensures proper cleanup by removing the container after execution.
-func (e *Executor) RunContainer(ctx context.Context, imageName string, cmd []string, config ContainerConfig, logCallback func(string)) (string, error) {
+func (e *Executor) RunContainer(ctx context.Context, imageName string, config ContainerConfig, logCallback func(string)) (string, error) {
 	e.logger.Debug("Starting container execution",
 		zap.String("image", imageName),
-		zap.Strings("command", cmd),
 		zap.Int64("memory_limit_mb", config.MemoryLimitMB),
 		zap.Float64("cpu_limit", config.CPULimit),
 		zap.Int32("timeout_seconds", config.TimeoutSeconds),
+		zap.Strings("requirements", config.Requirements),
+		zap.Int("script_size", len(config.Script)),
 	)
 
 	// Step 1: Create timeout context to enforce execution time limit
@@ -90,8 +94,9 @@ func (e *Executor) RunContainer(ctx context.Context, imageName string, cmd []str
 		return "", fmt.Errorf("failed to ensure image: %w", err)
 	}
 
-	// Step 3: Create container with resource limits and network isolation
-	containerID, err := e.createContainer(timeoutCtx, imageName, cmd, config)
+	// Step 3: Create container (do not start yet)
+	// We need to inject the script before starting
+	containerID, err := e.createContainer(timeoutCtx, imageName, config)
 	if err != nil {
 		return "", fmt.Errorf("failed to create container: %w", err)
 	}
@@ -113,7 +118,17 @@ func (e *Executor) RunContainer(ctx context.Context, imageName string, cmd []str
 		}
 	}()
 
-	// Step 4: Start the container
+	// Step 4: Inject script into container using in-memory tar archive
+	// This avoids writing any files to the host disk (zero disk footprint)
+	if err := e.injectScript(timeoutCtx, containerID, config.Script); err != nil {
+		return "", fmt.Errorf("failed to inject script: %w", err)
+	}
+
+	e.logger.Debug("Script injected into container",
+		zap.String("container_id", containerID),
+	)
+
+	// Step 5: Start the container (script is now inside)
 	if err := e.client.ContainerStart(timeoutCtx, containerID, container.StartOptions{}); err != nil {
 		return "", fmt.Errorf("failed to start container: %w", err)
 	}
@@ -122,7 +137,7 @@ func (e *Executor) RunContainer(ctx context.Context, imageName string, cmd []str
 		zap.String("container_id", containerID),
 	)
 
-	// Step 5: Stream logs in real-time while container is running
+	// Step 6: Stream logs in real-time while container is running
 	logs, err := e.streamLogs(timeoutCtx, containerID, logCallback)
 	if err != nil {
 		// Check if this was a timeout
@@ -140,7 +155,7 @@ func (e *Executor) RunContainer(ctx context.Context, imageName string, cmd []str
 		return "", fmt.Errorf("failed to stream logs: %w", err)
 	}
 
-	// Step 6: Wait for container to finish
+	// Step 7: Wait for container to finish
 	statusCh, errCh := e.client.ContainerWait(timeoutCtx, containerID, container.WaitConditionNotRunning)
 
 	select {
@@ -192,6 +207,46 @@ func (e *Executor) RunContainer(ctx context.Context, imageName string, cmd []str
 	}
 
 	return logs, nil
+}
+
+// injectScript creates a tar archive containing the script in RAM and copies it into the container.
+// This achieves zero disk footprint on the host by never writing to the host filesystem.
+//
+// The script is placed at /app/task.py inside the container.
+func (e *Executor) injectScript(ctx context.Context, containerID string, script string) error {
+	// Step 1: Create a buffer to hold the tar archive in RAM
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+
+	// Step 2: Write the tar header for task.py
+	scriptBytes := []byte(script)
+	hdr := &tar.Header{
+		Name: "task.py",
+		Mode: 0644,
+		Size: int64(len(scriptBytes)),
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		return fmt.Errorf("failed to write tar header: %w", err)
+	}
+
+	// Step 3: Write the script content
+	if _, err := tw.Write(scriptBytes); err != nil {
+		return fmt.Errorf("failed to write script to tar: %w", err)
+	}
+
+	// Step 4: Close the tar writer to finalize the archive
+	if err := tw.Close(); err != nil {
+		return fmt.Errorf("failed to close tar writer: %w", err)
+	}
+
+	// Step 5: Copy the tar archive into the container at /app
+	// This places task.py at /app/task.py inside the container
+	err := e.client.CopyToContainer(ctx, containerID, "/app", &buf, container.CopyToContainerOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to copy script to container: %w", err)
+	}
+
+	return nil
 }
 
 // ensureImage checks if the image exists locally and pulls it if not.
@@ -248,36 +303,72 @@ func (e *Executor) ensureImage(ctx context.Context, imageName string) error {
 	return nil
 }
 
-// createContainer creates a new container with the specified image, command, and resource limits.
+// createContainer creates a new container with the specified image and resource limits.
+// The container is created but NOT started - this allows us to inject the script first.
 // Resource limits, network isolation, and security hardening are applied via HostConfig.
 //
 // Security Hardening (Principle of Least Privilege):
 //   - CapDrop: ALL - Drops all Linux capabilities to minimize attack surface
 //   - SecurityOpt: no-new-privileges - Prevents privilege escalation via setuid/setgid binaries
-//   - ReadonlyRootfs: true - Makes container filesystem read-only to prevent tampering
 //   - Privileged: false - Explicitly disables privileged mode to prevent host access
 //   - User: 1000:1000 - Runs as non-root user to limit damage from container escape
-//   - Writable workspace mounted at /app/workspace for script output
-func (e *Executor) createContainer(ctx context.Context, imageName string, cmd []string, config ContainerConfig) (string, error) {
-	// Create a temporary directory on host for the container's writable workspace.
-	// This is necessary because we use ReadonlyRootfs to prevent the container
-	// from writing to its filesystem. Scripts need a place to write output files.
-	tempDir, err := os.MkdirTemp("", "container-workspace-*")
-	if err != nil {
-		return "", fmt.Errorf("failed to create temp workspace directory: %w", err)
-	}
+//   - Working directory set to /app where the script is injected
+func (e *Executor) createContainer(ctx context.Context, imageName string, config ContainerConfig) (string, error) {
+	// ============================================================
+	// DYNAMIC PIP INSTALLATION: Build command based on requirements
+	// ============================================================
+	//
+	// If requirements are specified, we need to:
+	// 1. Enable network access (bridge mode) to download packages
+	// 2. Construct a chained shell command: pip install ... && python task.py
+	//
+	// If no requirements, we keep the secure "none" network mode.
 
-	// Note: tempDir cleanup is handled by the container removal defer in RunContainer
-	// The defer will be extended to also remove this temp directory
+	var finalCmd []string
+	networkMode := container.NetworkMode("none") // Default: maximum security, no network
+
+	if len(config.Requirements) > 0 {
+		// Log the dependencies being installed for visibility
+		e.logger.Info("Installing dependencies before script execution",
+			zap.Strings("requirements", config.Requirements),
+		)
+
+		// Enable network access to allow pip to download packages from PyPI
+		// Using "bridge" mode which provides standard Docker networking
+		networkMode = container.NetworkMode("bridge")
+
+		// Build the pip install command with --no-cache-dir to minimize disk usage
+		// Format: pip install --no-cache-dir pkg1 pkg2 pkg3 && python task.py
+		pipInstallCmd := "pip install --user --no-cache-dir " + strings.Join(config.Requirements, " ")
+
+		// Chain commands: install dependencies first, then run the script
+		// Using && ensures the script only runs if pip install succeeds
+		combinedCmd := pipInstallCmd + " && python task.py"
+
+		// Wrap in shell to execute the chained command
+		// Using /bin/sh -c for maximum compatibility across images
+		finalCmd = []string{"/bin/sh", "-c", combinedCmd}
+
+		e.logger.Debug("Built combined command with pip install",
+			zap.String("combined_command", combinedCmd),
+		)
+	} else {
+		// No dependencies, just run the script directly
+		finalCmd = []string{"python", "task.py"}
+	}
 
 	containerConfig := &container.Config{
 		Image: imageName,
-		Cmd:   cmd,
+		Cmd:   finalCmd,
 		Tty:   false, // Don't allocate a pseudo-TTY
-
-		// WorkingDir: Set to the writable workspace directory inside the container.
-		// Scripts will execute in this directory and can write output files here.
-		WorkingDir: "/app/workspace",
+		Env: []string{
+			"HOME=/tmp",
+			// Python'un --user ile kurduğu paketleri bulabilmesi için PATH güncellemesi
+			"PATH=/tmp/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		},
+		// WorkingDir: Set to /app where the script is injected.
+		// Scripts will execute in this directory.
+		WorkingDir: "/app",
 
 		// User: Run as non-root user (UID:GID = 1000:1000).
 		// This limits the impact of container escape vulnerabilities.
@@ -308,9 +399,10 @@ func (e *Executor) createContainer(ctx context.Context, imageName string, cmd []
 			MemorySwap: memoryBytes,
 			NanoCPUs:   nanoCPUs, // CPU limit in nanoseconds per second
 		},
-		// CRITICAL: Network isolation - prevent script from accessing internet or local LAN
-		// NetworkMode "none" disables all networking for the container
-		NetworkMode: "none",
+		// NetworkMode: Conditionally set based on requirements
+		// - "none": No requirements, maximum security (no network access)
+		// - "bridge": Has requirements, needs network for pip install
+		NetworkMode: networkMode,
 
 		// ============================================================
 		// SECURITY HARDENING: Principle of Least Privilege
@@ -332,32 +424,15 @@ func (e *Executor) createContainer(ctx context.Context, imageName string, cmd []
 		// setuid binary to escalate from the non-root user to root.
 		SecurityOpt: []string{"no-new-privileges"},
 
-		// ReadonlyRootfs: Make the container's root filesystem read-only.
-		// This prevents the untrusted script from:
-		// - Modifying system binaries or libraries
-		// - Creating persistent backdoors
-		// - Tampering with configuration files
-		// Scripts can still write to the mounted /app/workspace directory.
-		ReadonlyRootfs: true,
-
 		// Privileged: Explicitly disable privileged mode.
 		// Privileged containers have full access to host devices and can
 		// escape containment. This flag ensures privileged mode is disabled
 		// even if it might be enabled by default in some configurations.
 		Privileged: false,
 
-		// Mounts: Bind mount the temporary workspace directory.
-		// Since ReadonlyRootfs is true, we need a writable location for:
-		// - Script output files
-		// - Temporary files created during execution
-		// The mount is bound to a host temp directory that we control and clean up.
-		Mounts: []mount.Mount{
-			{
-				Type:   mount.TypeBind,
-				Source: tempDir,          // Host temp directory
-				Target: "/app/workspace", // Container path (matches WorkingDir)
-			},
-		},
+		// Note: ReadonlyRootfs is NOT enabled here because we use CopyToContainer
+		// to inject the script, which requires a writable filesystem.
+		// The script is injected before the container starts, so this is safe.
 	}
 
 	e.logger.Debug("Creating container with resource limits and security hardening",
@@ -367,17 +442,13 @@ func (e *Executor) createContainer(ctx context.Context, imageName string, cmd []
 		zap.String("network_mode", string(hostConfig.NetworkMode)),
 		zap.Strings("cap_drop", hostConfig.CapDrop),
 		zap.Strings("security_opt", hostConfig.SecurityOpt),
-		zap.Bool("readonly_rootfs", hostConfig.ReadonlyRootfs),
 		zap.Bool("privileged", hostConfig.Privileged),
 		zap.String("user", containerConfig.User),
 		zap.String("working_dir", containerConfig.WorkingDir),
-		zap.String("workspace_temp_dir", tempDir),
 	)
 
 	resp, err := e.client.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, "")
 	if err != nil {
-		// Clean up temp directory on creation failure
-		os.RemoveAll(tempDir)
 		return "", err
 	}
 

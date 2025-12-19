@@ -28,6 +28,7 @@ message JobRequest {
   int64 memory_limit_mb = 5;   // Memory limit in MB (e.g., 512 for 512MB)
   float cpu_limit = 6;         // CPU limit (e.g., 0.5 for half core, 1.0 for one core)
   int32 timeout_seconds = 7;   // Execution timeout in seconds (e.g., 60)
+  repeated string requirements = 8; // Python dependencies to install (e.g., ["numpy", "pandas"])
 }
 
 // JobResult is sent from agent back to orchestrator with execution results

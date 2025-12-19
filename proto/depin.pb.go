@@ -161,6 +161,7 @@ type JobRequest struct {
 	MemoryLimitMb  int64                  `protobuf:"varint,5,opt,name=memory_limit_mb,json=memoryLimitMb,proto3" json:"memory_limit_mb,omitempty"`  // Memory limit in MB (e.g., 512 for 512MB)
 	CpuLimit       float32                `protobuf:"fixed32,6,opt,name=cpu_limit,json=cpuLimit,proto3" json:"cpu_limit,omitempty"`                  // CPU limit (e.g., 0.5 for half core, 1.0 for one core)
 	TimeoutSeconds int32                  `protobuf:"varint,7,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"` // Execution timeout in seconds (e.g., 60)
+	Requirements   []string               `protobuf:"bytes,8,rep,name=requirements,proto3" json:"requirements,omitempty"`                            // Python dependencies to install (e.g., ["numpy", "pandas"])
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -242,6 +243,13 @@ func (x *JobRequest) GetTimeoutSeconds() int32 {
 		return x.TimeoutSeconds
 	}
 	return 0
+}
+
+func (x *JobRequest) GetRequirements() []string {
+	if x != nil {
+		return x.Requirements
+	}
+	return nil
 }
 
 // JobResult is sent from agent back to orchestrator with execution results
@@ -546,7 +554,7 @@ const file_proto_depin_proto_rawDesc = "" +
 	"\x0edocker_version\x18\x05 \x01(\tR\rdockerVersion\"H\n" +
 	"\x14RegistrationResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\xe8\x01\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\x8c\x02\n" +
 	"\n" +
 	"JobRequest\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x14\n" +
@@ -555,7 +563,8 @@ const file_proto_depin_proto_rawDesc = "" +
 	"\x0escript_content\x18\x04 \x01(\tR\rscriptContent\x12&\n" +
 	"\x0fmemory_limit_mb\x18\x05 \x01(\x03R\rmemoryLimitMb\x12\x1b\n" +
 	"\tcpu_limit\x18\x06 \x01(\x02R\bcpuLimit\x12'\n" +
-	"\x0ftimeout_seconds\x18\a \x01(\x05R\x0etimeoutSeconds\"Y\n" +
+	"\x0ftimeout_seconds\x18\a \x01(\x05R\x0etimeoutSeconds\x12\"\n" +
+	"\frequirements\x18\b \x03(\tR\frequirements\"Y\n" +
 	"\tJobResult\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x1d\n" +
