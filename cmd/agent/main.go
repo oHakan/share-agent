@@ -1,0 +1,489 @@
+// Package main is the entry point for the DePIN GPU Agent.
+// It initializes all components, runs discovery, registers with orchestrator, and maintains connection.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
+
+	"go.uber.org/zap"
+
+	"github.com/depin-agent/agent/internal/client"
+	"github.com/depin-agent/agent/internal/config"
+	"github.com/depin-agent/agent/internal/hardware/gpu"
+	"github.com/depin-agent/agent/internal/hardware/host"
+	"github.com/depin-agent/agent/internal/runtime/docker"
+	"github.com/depin-agent/agent/pkg/logger"
+	pb "github.com/depin-agent/agent/proto"
+)
+
+// NodeCapacity aggregates all discovered capabilities of this node.
+// This is the main data structure that will be reported to the marketplace.
+type NodeCapacity struct {
+	// Host contains host machine information
+	Host *host.HostInfo `json:"host"`
+
+	// GPUs contains information about all discovered NVIDIA GPUs
+	GPUs *gpu.DiscoveryResult `json:"gpu_discovery"`
+
+	// Docker contains Docker runtime information
+	Docker *docker.DockerInfo `json:"docker"`
+
+	// AgentVersion is the version of this agent
+	AgentVersion string `json:"agent_version"`
+
+	// DiscoveryTime is when this discovery was performed
+	DiscoveryTime time.Time `json:"discovery_time"`
+
+	// DiscoveryDuration is how long the discovery took
+	DiscoveryDuration time.Duration `json:"discovery_duration_ms"`
+
+	// Errors contains any non-fatal errors encountered during discovery
+	Errors []string `json:"errors,omitempty"`
+}
+
+func main() {
+	// Load configuration first
+	cfg, err := config.Load()
+	if err != nil {
+		// Can't use logger yet, so use fmt
+		fmt.Fprintf(os.Stderr, "Failed to load configuration: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Initialize logger based on configuration
+	log, err := logger.New(cfg.DevMode)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+	defer logger.Sync(log)
+
+	log.Info("Starting DePIN GPU Agent",
+		zap.String("version", cfg.AgentVersion),
+		zap.Bool("dev_mode", cfg.DevMode),
+		zap.String("orchestrator", cfg.OrchestratorAddress),
+	)
+
+	// Setup graceful shutdown
+	// This creates a context that will be cancelled on SIGINT or SIGTERM
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Setup signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start shutdown listener in background
+	go func() {
+		sig := <-sigChan
+		log.Info("Received shutdown signal",
+			zap.String("signal", sig.String()),
+		)
+		cancel()
+	}()
+
+	// Run discovery
+	capacity, err := runDiscovery(ctx, cfg, log)
+	if err != nil {
+		log.Fatal("Discovery failed",
+			zap.Error(err),
+		)
+	}
+
+	// Output results as pretty JSON
+	outputJSON, err := json.MarshalIndent(capacity, "", "  ")
+	if err != nil {
+		log.Fatal("Failed to marshal results",
+			zap.Error(err),
+		)
+	}
+
+	// Log the complete node capacity
+	log.Info("Node capacity discovery complete",
+		zap.String("result", string(outputJSON)),
+	)
+
+	// Also print to stdout for easy viewing/piping
+	fmt.Println("\n=== Node Capacity ===")
+	fmt.Println(string(outputJSON))
+
+	// --- Create Docker Executor for job execution ---
+	executor, err := docker.NewExecutor(log)
+	if err != nil {
+		log.Error("Failed to create Docker executor",
+			zap.Error(err),
+		)
+		// Continue without executor - we won't be able to run jobs
+	}
+	if executor != nil {
+		defer executor.Close()
+	}
+
+	// --- Connect to Orchestrator and Register ---
+	if err := registerAndStream(ctx, cfg, capacity, executor, log); err != nil {
+		log.Error("Failed to register/stream with orchestrator",
+			zap.Error(err),
+		)
+		// Don't exit - agent can still function in standalone mode
+	}
+
+	// Keep agent running until shutdown signal
+	log.Info("Agent is running. Press Ctrl+C to stop.")
+	<-ctx.Done()
+	log.Info("Agent shutting down")
+}
+
+// registerAndStream connects to the orchestrator, registers this node,
+// and starts the bidirectional event stream for job processing.
+func registerAndStream(ctx context.Context, cfg *config.Config, capacity *NodeCapacity, executor *docker.Executor, log *zap.Logger) error {
+	log.Info("Connecting to orchestrator",
+		zap.String("address", cfg.OrchestratorAddress),
+	)
+
+	// Create gRPC client
+	clientConfig := &client.ClientConfig{
+		OrchestratorAddress: cfg.OrchestratorAddress,
+		MaxRetries:          cfg.MaxRetries,
+		InitialBackoff:      cfg.RetryBackoff,
+		MaxBackoff:          30 * time.Second,
+		ConnectionTimeout:   10 * time.Second,
+		CallTimeout:         10 * time.Second,
+	}
+
+	grpcClient := client.NewClient(clientConfig, log)
+
+	// Connect with retry
+	if err := grpcClient.Connect(ctx); err != nil {
+		return fmt.Errorf("connection failed: %w", err)
+	}
+
+	// Convert discovered capacity to proto NodeInfo
+	nodeInfo := capacityToNodeInfo(capacity)
+
+	// Register with orchestrator
+	resp, err := grpcClient.Register(ctx, nodeInfo)
+	if err != nil {
+		grpcClient.Close()
+		return fmt.Errorf("registration failed: %w", err)
+	}
+
+	log.Info("Registration successful",
+		zap.String("status", resp.Status),
+		zap.String("message", resp.Message),
+	)
+
+	// Create job handler that uses the Docker executor
+	jobHandler := createJobHandler(executor, log)
+
+	// Start the bidirectional event stream in background
+	// This handles both heartbeats and job execution
+	go func() {
+		heartbeatInterval := 30 * time.Second // Default heartbeat interval
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			err := grpcClient.StreamEvents(ctx, nodeInfo, jobHandler, heartbeatInterval)
+			if err != nil {
+				if ctx.Err() != nil {
+					// Context cancelled, shutting down
+					return
+				}
+				log.Error("Stream error, reconnecting...",
+					zap.Error(err),
+				)
+				time.Sleep(5 * time.Second)
+				continue
+			}
+		}
+	}()
+
+	return nil
+}
+
+// createJobHandler creates a job handler function that uses the Docker executor.
+func createJobHandler(executor *docker.Executor, log *zap.Logger) client.JobHandler {
+	return func(ctx context.Context, req *pb.JobRequest, logSender func(string)) *pb.JobResult {
+		result := &pb.JobResult{
+			JobId: req.JobId,
+		}
+
+		// Check if we have an executor
+		if executor == nil {
+			result.Status = "failed"
+			result.OutputLog = "Docker executor not available"
+			log.Error("Job failed - no executor",
+				zap.String("job_id", req.JobId),
+			)
+			return result
+		}
+
+		// Determine the command to run
+		// If script_content is provided, use it with Python -c flag
+		// Otherwise, use the provided command
+		cmd := req.Command
+		if req.ScriptContent != "" {
+			// Execute the script content using Python's -c flag
+			cmd = []string{"python", "-c", req.ScriptContent}
+			log.Info("Executing job with script content",
+				zap.String("job_id", req.JobId),
+				zap.String("image", req.Image),
+				zap.Int("script_length", len(req.ScriptContent)),
+			)
+		} else {
+			log.Info("Executing job",
+				zap.String("job_id", req.JobId),
+				zap.String("image", req.Image),
+				zap.Strings("command", req.Command),
+			)
+		}
+
+		// Build container config with resource limits from the job request
+		containerConfig := docker.ContainerConfig{
+			MemoryLimitMB:  req.MemoryLimitMb,     // Memory limit in MB
+			CPULimit:       float64(req.CpuLimit), // CPU limit in cores
+			TimeoutSeconds: req.TimeoutSeconds,    // Execution timeout in seconds
+		}
+
+		// Run the container with log streaming callback and security sandbox
+		output, err := executor.RunContainer(ctx, req.Image, cmd, containerConfig, logSender)
+		if err != nil {
+			result.Status = "failed"
+			result.OutputLog = fmt.Sprintf("Execution error: %v", err)
+			log.Error("Job execution failed",
+				zap.String("job_id", req.JobId),
+				zap.Error(err),
+			)
+			return result
+		}
+
+		result.Status = "completed"
+		result.OutputLog = output
+		log.Info("Job completed successfully",
+			zap.String("job_id", req.JobId),
+			zap.Int("output_length", len(output)),
+		)
+
+		return result
+	}
+}
+
+// capacityToNodeInfo converts discovered NodeCapacity to proto NodeInfo.
+// Only uses fields that exist in the proto definition.
+func capacityToNodeInfo(capacity *NodeCapacity) *pb.NodeInfo {
+	nodeInfo := &pb.NodeInfo{}
+
+	// Fill host info - only Id is available from host
+	if capacity.Host != nil {
+		nodeInfo.Id = capacity.Host.MachineID
+	}
+
+	// Fill GPU info (use first GPU if available)
+	if capacity.GPUs != nil && len(capacity.GPUs.GPUs) > 0 {
+		firstGPU := capacity.GPUs.GPUs[0]
+		nodeInfo.GpuModel = firstGPU.Name
+		nodeInfo.VramTotal = uint64(firstGPU.TotalVRAM * 1024 * 1024 * 1024) // GB to bytes
+		nodeInfo.VramFree = uint64(firstGPU.FreeVRAM * 1024 * 1024 * 1024)
+	}
+
+	// Fill Docker info
+	if capacity.Docker != nil && capacity.Docker.Available {
+		nodeInfo.DockerVersion = capacity.Docker.ServerVersion
+	}
+
+	return nodeInfo
+}
+
+// runDiscovery performs all discovery operations concurrently.
+// It uses WaitGroups and channels to coordinate parallel operations.
+func runDiscovery(ctx context.Context, cfg *config.Config, log *zap.Logger) (*NodeCapacity, error) {
+	startTime := time.Now()
+
+	capacity := &NodeCapacity{
+		AgentVersion:  cfg.AgentVersion,
+		DiscoveryTime: startTime,
+		Errors:        make([]string, 0),
+	}
+
+	// Use WaitGroup to coordinate concurrent discovery
+	var wg sync.WaitGroup
+	var mu sync.Mutex // Protects capacity.Errors
+
+	// Error helper function
+	addError := func(err string) {
+		mu.Lock()
+		capacity.Errors = append(capacity.Errors, err)
+		mu.Unlock()
+	}
+
+	// --- Host Discovery ---
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		log.Debug("Starting host telemetry collection")
+		collector := host.NewGopsutilCollector()
+
+		hostInfo, err := collector.Collect(ctx)
+		if err != nil {
+			log.Error("Host collection failed",
+				zap.Error(err),
+			)
+			addError(fmt.Sprintf("host: %v", err))
+			return
+		}
+
+		capacity.Host = hostInfo
+		log.Debug("Host telemetry collection complete",
+			zap.String("hostname", hostInfo.Hostname),
+			zap.String("os", hostInfo.OS),
+			zap.Float64("ram_gb", hostInfo.TotalRAM),
+		)
+	}()
+
+	// --- GPU Discovery ---
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		log.Debug("Starting GPU discovery")
+
+		// Create context with timeout for GPU operations
+		gpuCtx, gpuCancel := context.WithTimeout(ctx, cfg.GPUTimeout)
+		defer gpuCancel()
+
+		discoverer := gpu.NewNVMLDiscoverer()
+		defer func() {
+			if err := discoverer.Close(); err != nil {
+				log.Warn("Failed to close GPU discoverer",
+					zap.Error(err),
+				)
+			}
+		}()
+
+		gpuResult, err := discoverer.Discover(gpuCtx)
+		if err != nil {
+			log.Error("GPU discovery failed",
+				zap.Error(err),
+			)
+			addError(fmt.Sprintf("gpu: %v", err))
+			return
+		}
+
+		capacity.GPUs = gpuResult
+
+		if gpuResult.CPUOnlyMode {
+			log.Info("GPU discovery complete - CPU only mode",
+				zap.String("reason", gpuResult.Error),
+			)
+		} else {
+			log.Debug("GPU discovery complete",
+				zap.Int("gpu_count", len(gpuResult.GPUs)),
+				zap.String("driver_version", gpuResult.DriverVersion),
+			)
+		}
+	}()
+
+	// --- Docker Check ---
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		log.Debug("Starting Docker connectivity check")
+
+		// Create context with timeout for Docker operations
+		dockerCtx, dockerCancel := context.WithTimeout(ctx, cfg.DockerTimeout)
+		defer dockerCancel()
+
+		checker, err := docker.NewDockerChecker()
+		if err != nil {
+			log.Error("Failed to create Docker checker",
+				zap.Error(err),
+			)
+			addError(fmt.Sprintf("docker_init: %v", err))
+
+			// Create a placeholder result
+			capacity.Docker = &docker.DockerInfo{
+				Available: false,
+				Error:     err.Error(),
+			}
+
+			// Fail fast if Docker is required
+			if cfg.DockerRequired {
+				log.Fatal("Docker is required but unavailable",
+					zap.Error(err),
+				)
+			}
+			return
+		}
+		defer func() {
+			if err := checker.Close(); err != nil {
+				log.Warn("Failed to close Docker checker",
+					zap.Error(err),
+				)
+			}
+		}()
+
+		dockerInfo, err := checker.Check(dockerCtx)
+		if err != nil {
+			log.Error("Docker check failed",
+				zap.Error(err),
+			)
+			addError(fmt.Sprintf("docker: %v", err))
+			return
+		}
+
+		capacity.Docker = dockerInfo
+
+		if dockerInfo.Available {
+			log.Debug("Docker connectivity check complete",
+				zap.String("api_version", dockerInfo.APIVersion),
+				zap.String("server_version", dockerInfo.ServerVersion),
+				zap.Int("running_containers", dockerInfo.ContainersRunning),
+			)
+		} else {
+			log.Warn("Docker is not available",
+				zap.String("error", dockerInfo.Error),
+			)
+
+			// Fail fast if Docker is required
+			if cfg.DockerRequired {
+				log.Fatal("Docker is required but not available",
+					zap.String("error", dockerInfo.Error),
+				)
+			}
+		}
+	}()
+
+	// Wait for all discovery operations to complete
+	// Also handle context cancellation
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// All discoveries completed
+		log.Debug("All discovery operations complete")
+	case <-ctx.Done():
+		return nil, fmt.Errorf("discovery cancelled: %w", ctx.Err())
+	}
+
+	// Calculate discovery duration
+	capacity.DiscoveryDuration = time.Since(startTime)
+
+	return capacity, nil
+}

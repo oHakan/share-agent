@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package depin;
+
+option go_package = "github.com/oHakan/depin-orchestrator/proto";
+
+// NodeInfo contains information about a GPU node/agent
+message NodeInfo {
+  string id = 1;              // Unique identifier for the node
+  string gpu_model = 2;       // GPU model name (e.g., "NVIDIA RTX 4090")
+  uint64 vram_total = 3;      // Total VRAM in bytes
+  uint64 vram_free = 4;       // Available VRAM in bytes
+  string docker_version = 5;  // Docker version installed on the node
+}
+
+// RegistrationResponse is returned after a node registration attempt
+message RegistrationResponse {
+  string status = 1;   // Status of the registration (e.g., "success", "error")
+  string message = 2;  // Human-readable message about the registration result
+}
+
+// JobRequest is sent from orchestrator to agent to execute a container
+message JobRequest {
+  string job_id = 1;           // Unique identifier for this job
+  string image = 2;            // Docker image to run (e.g., "alpine")
+  repeated string command = 3; // Command to execute in the container
+  string script_content = 4;   // Raw Python script content to execute
+  int64 memory_limit_mb = 5;   // Memory limit in MB (e.g., 512 for 512MB)
+  float cpu_limit = 6;         // CPU limit (e.g., 0.5 for half core, 1.0 for one core)
+  int32 timeout_seconds = 7;   // Execution timeout in seconds (e.g., 60)
+}
+
+// JobResult is sent from agent back to orchestrator with execution results
+message JobResult {
+  string job_id = 1;      // Job ID this result belongs to
+  string status = 2;      // Status: "running", "completed", "failed"
+  string output_log = 3;  // Container output/logs
+}
+
+// JobLog is sent from agent to orchestrator for real-time log streaming
+message JobLog {
+  string job_id = 1;  // Job ID this log belongs to
+  string line = 2;    // Single log line from container stdout/stderr
+}
+
+// ServerEvent wraps messages sent from orchestrator to agent
+message ServerEvent {
+  oneof event {
+    JobRequest job_request = 1;
+  }
+}
+
+// AgentEvent wraps messages sent from agent to orchestrator
+message AgentEvent {
+  string node_id = 1;  // Identifies which agent is sending this event
+  oneof event {
+    NodeInfo heartbeat = 2;     // Periodic heartbeat with node info
+    JobResult job_result = 3;   // Result of a job execution
+    JobLog job_log = 4;         // Real-time log line from job execution
+  }
+}
+
+// NodeService handles node registration and management
+service NodeService {
+  // Register registers a new node with the orchestrator
+  rpc Register(NodeInfo) returns (RegistrationResponse) {}
+  
+  // StreamEvents establishes a bidirectional stream for real-time communication
+  // Agent sends AgentEvents (heartbeats, job results)
+  // Orchestrator sends ServerEvents (job requests)
+  rpc StreamEvents(stream AgentEvent) returns (stream ServerEvent) {}
+}
