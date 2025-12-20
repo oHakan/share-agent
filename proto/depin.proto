@@ -11,6 +11,7 @@ message NodeInfo {
   uint64 vram_total = 3;      // Total VRAM in bytes
   uint64 vram_free = 4;       // Available VRAM in bytes
   string docker_version = 5;  // Docker version installed on the node
+  string owner_id = 6;        // Clerk User ID of the node provider
 }
 
 // RegistrationResponse is returned after a node registration attempt

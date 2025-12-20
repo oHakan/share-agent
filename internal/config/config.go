@@ -4,9 +4,11 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
 
@@ -40,6 +42,10 @@ type Config struct {
 
 	// RetryBackoff is the initial backoff duration between retries
 	RetryBackoff time.Duration `mapstructure:"retry_backoff"`
+
+	// OwnerID is the Clerk User ID of the node provider
+	// Can be set via --owner/-o flag or NEXUS_OWNER_ID env var
+	OwnerID string `mapstructure:"owner_id"`
 }
 
 // DefaultConfig returns a Config with sensible default values.
@@ -60,8 +66,16 @@ func DefaultConfig() *Config {
 // Load reads configuration from environment variables and config files.
 // Environment variables take precedence over config file values.
 // All environment variables should be prefixed with "AGENT_" (e.g., AGENT_DEV_MODE).
+// OwnerID can also be set via NEXUS_OWNER_ID env var or --owner/-o flag.
 func Load() (*Config, error) {
 	v := viper.New()
+
+	// Define command-line flags
+	pflag.StringP("owner", "o", "", "Owner ID (Clerk User ID) of the node provider")
+	pflag.Parse()
+
+	// Bind command-line flags to viper
+	_ = v.BindPFlag("owner_id", pflag.Lookup("owner"))
 
 	// Set default values
 	defaults := DefaultConfig()
@@ -74,6 +88,7 @@ func Load() (*Config, error) {
 	v.SetDefault("orchestrator_address", defaults.OrchestratorAddress)
 	v.SetDefault("max_retries", defaults.MaxRetries)
 	v.SetDefault("retry_backoff", defaults.RetryBackoff)
+	v.SetDefault("owner_id", defaults.OwnerID)
 
 	// Configure environment variable handling
 	// Environment variables are prefixed with AGENT_ and use underscores
@@ -102,6 +117,13 @@ func Load() (*Config, error) {
 	cfg := &Config{}
 	if err := v.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
+	}
+
+	// Check NEXUS_OWNER_ID env var as fallback if owner_id is not set
+	if cfg.OwnerID == "" {
+		if nexusOwnerID := os.Getenv("NEXUS_OWNER_ID"); nexusOwnerID != "" {
+			cfg.OwnerID = nexusOwnerID
+		}
 	}
 
 	// Validate configuration

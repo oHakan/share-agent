@@ -29,6 +29,7 @@ type NodeInfo struct {
 	VramTotal     uint64                 `protobuf:"varint,3,opt,name=vram_total,json=vramTotal,proto3" json:"vram_total,omitempty"`            // Total VRAM in bytes
 	VramFree      uint64                 `protobuf:"varint,4,opt,name=vram_free,json=vramFree,proto3" json:"vram_free,omitempty"`               // Available VRAM in bytes
 	DockerVersion string                 `protobuf:"bytes,5,opt,name=docker_version,json=dockerVersion,proto3" json:"docker_version,omitempty"` // Docker version installed on the node
+	OwnerId       string                 `protobuf:"bytes,6,opt,name=owner_id,json=ownerId,proto3" json:"owner_id,omitempty"`                   // Clerk User ID of the node provider
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -94,6 +95,13 @@ func (x *NodeInfo) GetVramFree() uint64 {
 func (x *NodeInfo) GetDockerVersion() string {
 	if x != nil {
 		return x.DockerVersion
+	}
+	return ""
+}
+
+func (x *NodeInfo) GetOwnerId() string {
+	if x != nil {
+		return x.OwnerId
 	}
 	return ""
 }
@@ -544,14 +552,15 @@ var File_proto_depin_proto protoreflect.FileDescriptor
 
 const file_proto_depin_proto_rawDesc = "" +
 	"\n" +
-	"\x11proto/depin.proto\x12\x05depin\"\x9a\x01\n" +
+	"\x11proto/depin.proto\x12\x05depin\"\xb5\x01\n" +
 	"\bNodeInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
 	"\tgpu_model\x18\x02 \x01(\tR\bgpuModel\x12\x1d\n" +
 	"\n" +
 	"vram_total\x18\x03 \x01(\x04R\tvramTotal\x12\x1b\n" +
 	"\tvram_free\x18\x04 \x01(\x04R\bvramFree\x12%\n" +
-	"\x0edocker_version\x18\x05 \x01(\tR\rdockerVersion\"H\n" +
+	"\x0edocker_version\x18\x05 \x01(\tR\rdockerVersion\x12\x19\n" +
+	"\bowner_id\x18\x06 \x01(\tR\aownerId\"H\n" +
 	"\x14RegistrationResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"\x8c\x02\n" +

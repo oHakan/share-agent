@@ -165,7 +165,7 @@ func registerAndStream(ctx context.Context, cfg *config.Config, capacity *NodeCa
 	}
 
 	// Convert discovered capacity to proto NodeInfo
-	nodeInfo := capacityToNodeInfo(capacity)
+	nodeInfo := capacityToNodeInfo(capacity, cfg, log)
 
 	// Register with orchestrator
 	resp, err := grpcClient.Register(ctx, nodeInfo)
@@ -281,7 +281,7 @@ func createJobHandler(executor *docker.Executor, log *zap.Logger) client.JobHand
 
 // capacityToNodeInfo converts discovered NodeCapacity to proto NodeInfo.
 // Only uses fields that exist in the proto definition.
-func capacityToNodeInfo(capacity *NodeCapacity) *pb.NodeInfo {
+func capacityToNodeInfo(capacity *NodeCapacity, cfg *config.Config, log *zap.Logger) *pb.NodeInfo {
 	nodeInfo := &pb.NodeInfo{}
 
 	// Fill host info - only Id is available from host
@@ -300,6 +300,16 @@ func capacityToNodeInfo(capacity *NodeCapacity) *pb.NodeInfo {
 	// Fill Docker info
 	if capacity.Docker != nil && capacity.Docker.Available {
 		nodeInfo.DockerVersion = capacity.Docker.ServerVersion
+	}
+
+	// Fill Owner ID from configuration
+	if cfg.OwnerID != "" {
+		nodeInfo.OwnerId = cfg.OwnerID
+		log.Info("Owner ID configured",
+			zap.String("owner_id", cfg.OwnerID),
+		)
+	} else {
+		log.Warn("Owner ID not configured. Set via --owner flag or NEXUS_OWNER_ID env var")
 	}
 
 	return nodeInfo
