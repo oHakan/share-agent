@@ -1,5 +1,7 @@
 // Package main is the entry point for the DePIN GPU Agent.
 // It initializes all components, runs discovery, registers with orchestrator, and maintains connection.
+
+// go run .\cmd\agent\ --owner=user_377268BpQY4RydCUqvTLu2R0wH3
 package main
 
 import (
@@ -309,7 +311,7 @@ func capacityToNodeInfo(capacity *NodeCapacity, cfg *config.Config, log *zap.Log
 			zap.String("owner_id", cfg.OwnerID),
 		)
 	} else {
-		log.Warn("Owner ID not configured. Set via --owner flag or NEXUS_OWNER_ID env var")
+		panic("Owner ID not configured. Set via --owner flag or NEXUS_OWNER_ID env var")
 	}
 
 	return nodeInfo
