@@ -32,11 +32,26 @@ message JobRequest {
   repeated string requirements = 8; // Python dependencies to install (e.g., ["numpy", "pandas"])
 }
 
+// Heartbeat contains real-time telemetry data for live graphs
+message Heartbeat {
+  string node_id = 1;      // Unique node identifier
+  double cpu_percent = 2;  // Current CPU usage (0-100)
+  double ram_percent = 3;  // Current RAM usage (0-100)
+  string uptime = 4;       // System uptime as human-readable string (e.g., "2h 15m 30s")
+}
+
+// JobStats contains execution statistics for completed jobs
+message JobStats {
+  double peak_cpu_percent = 1;   // Peak CPU usage during execution
+  int64 duration_ms = 2;         // Total execution duration in milliseconds
+}
+
 // JobResult is sent from agent back to orchestrator with execution results
 message JobResult {
   string job_id = 1;      // Job ID this result belongs to
   string status = 2;      // Status: "running", "completed", "failed"
   string output_log = 3;  // Container output/logs
+  JobStats stats = 4;     // Execution statistics (optional, only on completion)
 }
 
 // JobLog is sent from agent to orchestrator for real-time log streaming
@@ -56,7 +71,7 @@ message ServerEvent {
 message AgentEvent {
   string node_id = 1;  // Identifies which agent is sending this event
   oneof event {
-    NodeInfo heartbeat = 2;     // Periodic heartbeat with node info
+    Heartbeat heartbeat = 2;    // Real-time telemetry (every 3s)
     JobResult job_result = 3;   // Result of a job execution
     JobLog job_log = 4;         // Real-time log line from job execution
   }

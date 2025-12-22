@@ -215,7 +215,7 @@ func (c *Client) Register(ctx context.Context, nodeInfo *pb.NodeInfo) (*pb.Regis
 // Results are automatically sent back to the orchestrator.
 //
 // This function blocks until the context is cancelled or an error occurs.
-func (c *Client) StreamEvents(ctx context.Context, nodeInfo *pb.NodeInfo, handler JobHandler, heartbeatInterval time.Duration) error {
+func (c *Client) StreamEvents(ctx context.Context, nodeInfo *pb.NodeInfo, handler JobHandler, telemetryProvider func() *pb.Heartbeat, heartbeatInterval time.Duration) error {
 	c.mu.RLock()
 	if c.client == nil {
 		c.mu.RUnlock()
@@ -339,7 +339,7 @@ func (c *Client) StreamEvents(ctx context.Context, nodeInfo *pb.NodeInfo, handle
 	// Send initial heartbeat
 	initialHeartbeat := &pb.AgentEvent{
 		NodeId: nodeID,
-		Event:  &pb.AgentEvent_Heartbeat{Heartbeat: nodeInfo},
+		Event:  &pb.AgentEvent_Heartbeat{Heartbeat: telemetryProvider()},
 	}
 	if err := stream.Send(initialHeartbeat); err != nil {
 		return fmt.Errorf("failed to send initial heartbeat: %w", err)
@@ -363,7 +363,7 @@ func (c *Client) StreamEvents(ctx context.Context, nodeInfo *pb.NodeInfo, handle
 		case <-ticker.C:
 			heartbeat := &pb.AgentEvent{
 				NodeId: nodeID,
-				Event:  &pb.AgentEvent_Heartbeat{Heartbeat: nodeInfo},
+				Event:  &pb.AgentEvent_Heartbeat{Heartbeat: telemetryProvider()},
 			}
 			select {
 			case sendCh <- heartbeat:

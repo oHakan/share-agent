@@ -260,19 +260,142 @@ func (x *JobRequest) GetRequirements() []string {
 	return nil
 }
 
+// Heartbeat contains real-time telemetry data for live graphs
+type Heartbeat struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`               // Unique node identifier
+	CpuPercent    float64                `protobuf:"fixed64,2,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"` // Current CPU usage (0-100)
+	RamPercent    float64                `protobuf:"fixed64,3,opt,name=ram_percent,json=ramPercent,proto3" json:"ram_percent,omitempty"` // Current RAM usage (0-100)
+	Uptime        string                 `protobuf:"bytes,4,opt,name=uptime,proto3" json:"uptime,omitempty"`                             // System uptime as human-readable string (e.g., "2h 15m 30s")
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Heartbeat) Reset() {
+	*x = Heartbeat{}
+	mi := &file_proto_depin_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Heartbeat) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Heartbeat) ProtoMessage() {}
+
+func (x *Heartbeat) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_depin_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Heartbeat.ProtoReflect.Descriptor instead.
+func (*Heartbeat) Descriptor() ([]byte, []int) {
+	return file_proto_depin_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *Heartbeat) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *Heartbeat) GetCpuPercent() float64 {
+	if x != nil {
+		return x.CpuPercent
+	}
+	return 0
+}
+
+func (x *Heartbeat) GetRamPercent() float64 {
+	if x != nil {
+		return x.RamPercent
+	}
+	return 0
+}
+
+func (x *Heartbeat) GetUptime() string {
+	if x != nil {
+		return x.Uptime
+	}
+	return ""
+}
+
+// JobStats contains execution statistics for completed jobs
+type JobStats struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	PeakCpuPercent float64                `protobuf:"fixed64,1,opt,name=peak_cpu_percent,json=peakCpuPercent,proto3" json:"peak_cpu_percent,omitempty"` // Peak CPU usage during execution
+	DurationMs     int64                  `protobuf:"varint,2,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`                // Total execution duration in milliseconds
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *JobStats) Reset() {
+	*x = JobStats{}
+	mi := &file_proto_depin_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JobStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JobStats) ProtoMessage() {}
+
+func (x *JobStats) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_depin_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JobStats.ProtoReflect.Descriptor instead.
+func (*JobStats) Descriptor() ([]byte, []int) {
+	return file_proto_depin_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *JobStats) GetPeakCpuPercent() float64 {
+	if x != nil {
+		return x.PeakCpuPercent
+	}
+	return 0
+}
+
+func (x *JobStats) GetDurationMs() int64 {
+	if x != nil {
+		return x.DurationMs
+	}
+	return 0
+}
+
 // JobResult is sent from agent back to orchestrator with execution results
 type JobResult struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`             // Job ID this result belongs to
 	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`                        // Status: "running", "completed", "failed"
 	OutputLog     string                 `protobuf:"bytes,3,opt,name=output_log,json=outputLog,proto3" json:"output_log,omitempty"` // Container output/logs
+	Stats         *JobStats              `protobuf:"bytes,4,opt,name=stats,proto3" json:"stats,omitempty"`                          // Execution statistics (optional, only on completion)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *JobResult) Reset() {
 	*x = JobResult{}
-	mi := &file_proto_depin_proto_msgTypes[3]
+	mi := &file_proto_depin_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -284,7 +407,7 @@ func (x *JobResult) String() string {
 func (*JobResult) ProtoMessage() {}
 
 func (x *JobResult) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[3]
+	mi := &file_proto_depin_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -297,7 +420,7 @@ func (x *JobResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobResult.ProtoReflect.Descriptor instead.
 func (*JobResult) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{3}
+	return file_proto_depin_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *JobResult) GetJobId() string {
@@ -321,6 +444,13 @@ func (x *JobResult) GetOutputLog() string {
 	return ""
 }
 
+func (x *JobResult) GetStats() *JobStats {
+	if x != nil {
+		return x.Stats
+	}
+	return nil
+}
+
 // JobLog is sent from agent to orchestrator for real-time log streaming
 type JobLog struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -332,7 +462,7 @@ type JobLog struct {
 
 func (x *JobLog) Reset() {
 	*x = JobLog{}
-	mi := &file_proto_depin_proto_msgTypes[4]
+	mi := &file_proto_depin_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -344,7 +474,7 @@ func (x *JobLog) String() string {
 func (*JobLog) ProtoMessage() {}
 
 func (x *JobLog) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[4]
+	mi := &file_proto_depin_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -357,7 +487,7 @@ func (x *JobLog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobLog.ProtoReflect.Descriptor instead.
 func (*JobLog) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{4}
+	return file_proto_depin_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *JobLog) GetJobId() string {
@@ -387,7 +517,7 @@ type ServerEvent struct {
 
 func (x *ServerEvent) Reset() {
 	*x = ServerEvent{}
-	mi := &file_proto_depin_proto_msgTypes[5]
+	mi := &file_proto_depin_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -399,7 +529,7 @@ func (x *ServerEvent) String() string {
 func (*ServerEvent) ProtoMessage() {}
 
 func (x *ServerEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[5]
+	mi := &file_proto_depin_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -412,7 +542,7 @@ func (x *ServerEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerEvent.ProtoReflect.Descriptor instead.
 func (*ServerEvent) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{5}
+	return file_proto_depin_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ServerEvent) GetEvent() isServerEvent_Event {
@@ -457,7 +587,7 @@ type AgentEvent struct {
 
 func (x *AgentEvent) Reset() {
 	*x = AgentEvent{}
-	mi := &file_proto_depin_proto_msgTypes[6]
+	mi := &file_proto_depin_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -469,7 +599,7 @@ func (x *AgentEvent) String() string {
 func (*AgentEvent) ProtoMessage() {}
 
 func (x *AgentEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[6]
+	mi := &file_proto_depin_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -482,7 +612,7 @@ func (x *AgentEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentEvent.ProtoReflect.Descriptor instead.
 func (*AgentEvent) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{6}
+	return file_proto_depin_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *AgentEvent) GetNodeId() string {
@@ -499,7 +629,7 @@ func (x *AgentEvent) GetEvent() isAgentEvent_Event {
 	return nil
 }
 
-func (x *AgentEvent) GetHeartbeat() *NodeInfo {
+func (x *AgentEvent) GetHeartbeat() *Heartbeat {
 	if x != nil {
 		if x, ok := x.Event.(*AgentEvent_Heartbeat); ok {
 			return x.Heartbeat
@@ -531,7 +661,7 @@ type isAgentEvent_Event interface {
 }
 
 type AgentEvent_Heartbeat struct {
-	Heartbeat *NodeInfo `protobuf:"bytes,2,opt,name=heartbeat,proto3,oneof"` // Periodic heartbeat with node info
+	Heartbeat *Heartbeat `protobuf:"bytes,2,opt,name=heartbeat,proto3,oneof"` // Real-time telemetry (every 3s)
 }
 
 type AgentEvent_JobResult struct {
@@ -573,23 +703,35 @@ const file_proto_depin_proto_rawDesc = "" +
 	"\x0fmemory_limit_mb\x18\x05 \x01(\x03R\rmemoryLimitMb\x12\x1b\n" +
 	"\tcpu_limit\x18\x06 \x01(\x02R\bcpuLimit\x12'\n" +
 	"\x0ftimeout_seconds\x18\a \x01(\x05R\x0etimeoutSeconds\x12\"\n" +
-	"\frequirements\x18\b \x03(\tR\frequirements\"Y\n" +
+	"\frequirements\x18\b \x03(\tR\frequirements\"~\n" +
+	"\tHeartbeat\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1f\n" +
+	"\vcpu_percent\x18\x02 \x01(\x01R\n" +
+	"cpuPercent\x12\x1f\n" +
+	"\vram_percent\x18\x03 \x01(\x01R\n" +
+	"ramPercent\x12\x16\n" +
+	"\x06uptime\x18\x04 \x01(\tR\x06uptime\"U\n" +
+	"\bJobStats\x12(\n" +
+	"\x10peak_cpu_percent\x18\x01 \x01(\x01R\x0epeakCpuPercent\x12\x1f\n" +
+	"\vduration_ms\x18\x02 \x01(\x03R\n" +
+	"durationMs\"\x80\x01\n" +
 	"\tJobResult\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x1d\n" +
 	"\n" +
-	"output_log\x18\x03 \x01(\tR\toutputLog\"3\n" +
+	"output_log\x18\x03 \x01(\tR\toutputLog\x12%\n" +
+	"\x05stats\x18\x04 \x01(\v2\x0f.depin.JobStatsR\x05stats\"3\n" +
 	"\x06JobLog\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x12\n" +
 	"\x04line\x18\x02 \x01(\tR\x04line\"L\n" +
 	"\vServerEvent\x124\n" +
 	"\vjob_request\x18\x01 \x01(\v2\x11.depin.JobRequestH\x00R\n" +
 	"jobRequestB\a\n" +
-	"\x05event\"\xbc\x01\n" +
+	"\x05event\"\xbd\x01\n" +
 	"\n" +
 	"AgentEvent\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12/\n" +
-	"\theartbeat\x18\x02 \x01(\v2\x0f.depin.NodeInfoH\x00R\theartbeat\x121\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x120\n" +
+	"\theartbeat\x18\x02 \x01(\v2\x10.depin.HeartbeatH\x00R\theartbeat\x121\n" +
 	"\n" +
 	"job_result\x18\x03 \x01(\v2\x10.depin.JobResultH\x00R\tjobResult\x12(\n" +
 	"\ajob_log\x18\x04 \x01(\v2\r.depin.JobLogH\x00R\x06jobLogB\a\n" +
@@ -610,30 +752,33 @@ func file_proto_depin_proto_rawDescGZIP() []byte {
 	return file_proto_depin_proto_rawDescData
 }
 
-var file_proto_depin_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_proto_depin_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_proto_depin_proto_goTypes = []any{
 	(*NodeInfo)(nil),             // 0: depin.NodeInfo
 	(*RegistrationResponse)(nil), // 1: depin.RegistrationResponse
 	(*JobRequest)(nil),           // 2: depin.JobRequest
-	(*JobResult)(nil),            // 3: depin.JobResult
-	(*JobLog)(nil),               // 4: depin.JobLog
-	(*ServerEvent)(nil),          // 5: depin.ServerEvent
-	(*AgentEvent)(nil),           // 6: depin.AgentEvent
+	(*Heartbeat)(nil),            // 3: depin.Heartbeat
+	(*JobStats)(nil),             // 4: depin.JobStats
+	(*JobResult)(nil),            // 5: depin.JobResult
+	(*JobLog)(nil),               // 6: depin.JobLog
+	(*ServerEvent)(nil),          // 7: depin.ServerEvent
+	(*AgentEvent)(nil),           // 8: depin.AgentEvent
 }
 var file_proto_depin_proto_depIdxs = []int32{
-	2, // 0: depin.ServerEvent.job_request:type_name -> depin.JobRequest
-	0, // 1: depin.AgentEvent.heartbeat:type_name -> depin.NodeInfo
-	3, // 2: depin.AgentEvent.job_result:type_name -> depin.JobResult
-	4, // 3: depin.AgentEvent.job_log:type_name -> depin.JobLog
-	0, // 4: depin.NodeService.Register:input_type -> depin.NodeInfo
-	6, // 5: depin.NodeService.StreamEvents:input_type -> depin.AgentEvent
-	1, // 6: depin.NodeService.Register:output_type -> depin.RegistrationResponse
-	5, // 7: depin.NodeService.StreamEvents:output_type -> depin.ServerEvent
-	6, // [6:8] is the sub-list for method output_type
-	4, // [4:6] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	4, // 0: depin.JobResult.stats:type_name -> depin.JobStats
+	2, // 1: depin.ServerEvent.job_request:type_name -> depin.JobRequest
+	3, // 2: depin.AgentEvent.heartbeat:type_name -> depin.Heartbeat
+	5, // 3: depin.AgentEvent.job_result:type_name -> depin.JobResult
+	6, // 4: depin.AgentEvent.job_log:type_name -> depin.JobLog
+	0, // 5: depin.NodeService.Register:input_type -> depin.NodeInfo
+	8, // 6: depin.NodeService.StreamEvents:input_type -> depin.AgentEvent
+	1, // 7: depin.NodeService.Register:output_type -> depin.RegistrationResponse
+	7, // 8: depin.NodeService.StreamEvents:output_type -> depin.ServerEvent
+	7, // [7:9] is the sub-list for method output_type
+	5, // [5:7] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_proto_depin_proto_init() }
@@ -641,10 +786,10 @@ func file_proto_depin_proto_init() {
 	if File_proto_depin_proto != nil {
 		return
 	}
-	file_proto_depin_proto_msgTypes[5].OneofWrappers = []any{
+	file_proto_depin_proto_msgTypes[7].OneofWrappers = []any{
 		(*ServerEvent_JobRequest)(nil),
 	}
-	file_proto_depin_proto_msgTypes[6].OneofWrappers = []any{
+	file_proto_depin_proto_msgTypes[8].OneofWrappers = []any{
 		(*AgentEvent_Heartbeat)(nil),
 		(*AgentEvent_JobResult)(nil),
 		(*AgentEvent_JobLog)(nil),
@@ -655,7 +800,7 @@ func file_proto_depin_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_depin_proto_rawDesc), len(file_proto_depin_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

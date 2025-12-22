@@ -21,6 +21,7 @@ import (
 	"github.com/depin-agent/agent/internal/hardware/gpu"
 	"github.com/depin-agent/agent/internal/hardware/host"
 	"github.com/depin-agent/agent/internal/runtime/docker"
+	"github.com/depin-agent/agent/internal/telemetry"
 	"github.com/depin-agent/agent/pkg/logger"
 	pb "github.com/depin-agent/agent/proto"
 )
@@ -184,10 +185,37 @@ func registerAndStream(ctx context.Context, cfg *config.Config, capacity *NodeCa
 	// Create job handler that uses the Docker executor
 	jobHandler := createJobHandler(executor, log)
 
+	// Initialize telemetry collector
+	telemetryCollector := telemetry.NewGopsutilCollector()
+
+	// Create telemetry provider for heartbeats
+	telemetryProvider := func() *pb.Heartbeat {
+		// Collect real-time stats
+		// Use a short timeout to not block heartbeat
+		tCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+		defer cancel()
+
+		stats, err := telemetryCollector.Collect(tCtx)
+		if err != nil {
+			log.Warn("Failed to collect telemetry", zap.Error(err))
+			// Return minimal heartbeat on error
+			return &pb.Heartbeat{
+				NodeId: nodeInfo.Id,
+			}
+		}
+
+		return &pb.Heartbeat{
+			NodeId:     nodeInfo.Id,
+			CpuPercent: stats.CPUPercent,
+			RamPercent: stats.RAMPercent,
+			Uptime:     stats.Uptime,
+		}
+	}
+
 	// Start the bidirectional event stream in background
 	// This handles both heartbeats and job execution
 	go func() {
-		heartbeatInterval := 30 * time.Second // Default heartbeat interval
+		heartbeatInterval := 3 * time.Second // 3 seconds heartbeat for live graphs
 
 		for {
 			select {
@@ -196,7 +224,7 @@ func registerAndStream(ctx context.Context, cfg *config.Config, capacity *NodeCa
 			default:
 			}
 
-			err := grpcClient.StreamEvents(ctx, nodeInfo, jobHandler, heartbeatInterval)
+			err := grpcClient.StreamEvents(ctx, nodeInfo, jobHandler, telemetryProvider, heartbeatInterval)
 			if err != nil {
 				if ctx.Err() != nil {
 					// Context cancelled, shutting down
@@ -259,7 +287,10 @@ func createJobHandler(executor *docker.Executor, log *zap.Logger) client.JobHand
 		}
 
 		// Run the container with log streaming callback and security sandbox
+		startTime := time.Now()
 		output, err := executor.RunContainer(ctx, req.Image, containerConfig, logSender)
+		duration := time.Since(startTime)
+
 		if err != nil {
 			result.Status = "failed"
 			result.OutputLog = fmt.Sprintf("Execution error: %v", err)
@@ -272,9 +303,19 @@ func createJobHandler(executor *docker.Executor, log *zap.Logger) client.JobHand
 
 		result.Status = "completed"
 		result.OutputLog = output
+
+		// Add execution stats
+		// Note: Peak CPU implementation would require continuous monitoring during execution
+		// For now we just send the duration and 0 for peak CPU or we could sample once
+		result.Stats = &pb.JobStats{
+			DurationMs: duration.Milliseconds(),
+			// PeakCpuPercent: 0, // Placeholder until container monitoring is implemented
+		}
+
 		log.Info("Job completed successfully",
 			zap.String("job_id", req.JobId),
 			zap.Int("output_length", len(output)),
+			zap.Int64("duration_ms", duration.Milliseconds()),
 		)
 
 		return result
