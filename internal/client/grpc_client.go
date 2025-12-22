@@ -43,7 +43,7 @@ type ClientConfig struct {
 // DefaultClientConfig returns a ClientConfig with sensible defaults.
 func DefaultClientConfig() *ClientConfig {
 	return &ClientConfig{
-		OrchestratorAddress: "localhost:50051",
+		OrchestratorAddress: "trolley.proxy.rlwy.net:23340",
 		MaxRetries:          5,
 		InitialBackoff:      1 * time.Second,
 		MaxBackoff:          30 * time.Second,
