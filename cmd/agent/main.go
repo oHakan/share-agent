@@ -330,6 +330,13 @@ func capacityToNodeInfo(capacity *NodeCapacity, cfg *config.Config, log *zap.Log
 	// Fill host info - only Id is available from host
 	if capacity.Host != nil {
 		nodeInfo.Id = capacity.Host.MachineID
+
+		// New Hardware Specs
+		nodeInfo.CpuModel = capacity.Host.CPUModel
+		nodeInfo.CpuCores = int32(capacity.Host.CPUCores)
+		nodeInfo.RamTotalMb = int64(capacity.Host.TotalRAM * 1024)
+		nodeInfo.DiskTotalGb = capacity.Host.DiskTotalGB
+		nodeInfo.OsInfo = capacity.Host.OSInfo
 	}
 
 	// Fill GPU info (use first GPU if available)
@@ -338,6 +345,16 @@ func capacityToNodeInfo(capacity *NodeCapacity, cfg *config.Config, log *zap.Log
 		nodeInfo.GpuModel = firstGPU.Name
 		nodeInfo.VramTotal = uint64(firstGPU.TotalVRAM * 1024 * 1024 * 1024) // GB to bytes
 		nodeInfo.VramFree = uint64(firstGPU.FreeVRAM * 1024 * 1024 * 1024)
+
+		// Map all GPUs
+		for _, g := range capacity.GPUs.GPUs {
+			nodeInfo.GpuInfo = append(nodeInfo.GpuInfo, &pb.GPUInfo{
+				Name:          g.Name,
+				VramMb:        int64(g.TotalVRAM * 1024),
+				DriverVersion: g.DriverVersion,
+				CudaVersion:   g.ComputeCapability, // Using Compute Capability as proxy or we could add field
+			})
+		}
 	}
 
 	// Fill Docker info

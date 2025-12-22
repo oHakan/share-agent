@@ -8,6 +8,7 @@ import (
 	"runtime"
 
 	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/disk"
 	hostinfo "github.com/shirou/gopsutil/v3/host"
 	"github.com/shirou/gopsutil/v3/mem"
 )
@@ -60,6 +61,12 @@ type HostInfo struct {
 
 	// Uptime is the system uptime in seconds
 	Uptime uint64 `json:"uptime_seconds"`
+
+	// DiskTotalGB is the total disk space in gigabytes
+	DiskTotalGB int64 `json:"disk_total_gb"`
+
+	// OSInfo is a pretty printed OS name (e.g. "Ubuntu 22.04 LTS")
+	OSInfo string `json:"os_info"`
 }
 
 // Collector is the interface for host telemetry collection.
@@ -103,7 +110,28 @@ func (c *GopsutilCollector) Collect(ctx context.Context) (*HostInfo, error) {
 	info.PlatformVersion = hostStat.PlatformVersion
 	info.KernelVersion = hostStat.KernelVersion
 	info.KernelArch = hostStat.KernelArch
+	info.KernelArch = hostStat.KernelArch
 	info.Uptime = hostStat.Uptime
+
+	// Format OS Info
+	if hostStat.PlatformVersion != "" {
+		info.OSInfo = fmt.Sprintf("%s %s", hostStat.Platform, hostStat.PlatformVersion)
+	} else {
+		info.OSInfo = fmt.Sprintf("%s %s", hostStat.OS, hostStat.KernelVersion)
+	}
+
+	// Get disk information
+	// We check the root path "/" which works on both Linux and Windows (converted to C:\)
+	diskStat, err := disk.UsageWithContext(ctx, "/")
+	if err == nil {
+		info.DiskTotalGB = int64(diskStat.Total / (1024 * 1024 * 1024))
+	} else {
+		// Try "." as fallback if root fails
+		diskStat, err = disk.UsageWithContext(ctx, ".")
+		if err == nil {
+			info.DiskTotalGB = int64(diskStat.Total / (1024 * 1024 * 1024))
+		}
+	}
 
 	// Get machine ID
 	// The HostID from gopsutil provides a unique machine identifier

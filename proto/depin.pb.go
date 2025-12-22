@@ -21,6 +21,75 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// GPUInfo contains detailed specifications for a single GPU
+type GPUInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                                        // GPU model name (e.g. "NVIDIA GeForce RTX 4090")
+	VramMb        int64                  `protobuf:"varint,2,opt,name=vram_mb,json=vramMb,proto3" json:"vram_mb,omitempty"`                     // Video Memory in Megabytes
+	DriverVersion string                 `protobuf:"bytes,3,opt,name=driver_version,json=driverVersion,proto3" json:"driver_version,omitempty"` // Driver version (e.g. "535.104")
+	CudaVersion   string                 `protobuf:"bytes,4,opt,name=cuda_version,json=cudaVersion,proto3" json:"cuda_version,omitempty"`       // CUDA version (e.g. "12.2")
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GPUInfo) Reset() {
+	*x = GPUInfo{}
+	mi := &file_proto_depin_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GPUInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GPUInfo) ProtoMessage() {}
+
+func (x *GPUInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_depin_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GPUInfo.ProtoReflect.Descriptor instead.
+func (*GPUInfo) Descriptor() ([]byte, []int) {
+	return file_proto_depin_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *GPUInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *GPUInfo) GetVramMb() int64 {
+	if x != nil {
+		return x.VramMb
+	}
+	return 0
+}
+
+func (x *GPUInfo) GetDriverVersion() string {
+	if x != nil {
+		return x.DriverVersion
+	}
+	return ""
+}
+
+func (x *GPUInfo) GetCudaVersion() string {
+	if x != nil {
+		return x.CudaVersion
+	}
+	return ""
+}
+
 // NodeInfo contains information about a GPU node/agent
 type NodeInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -30,13 +99,20 @@ type NodeInfo struct {
 	VramFree      uint64                 `protobuf:"varint,4,opt,name=vram_free,json=vramFree,proto3" json:"vram_free,omitempty"`               // Available VRAM in bytes
 	DockerVersion string                 `protobuf:"bytes,5,opt,name=docker_version,json=dockerVersion,proto3" json:"docker_version,omitempty"` // Docker version installed on the node
 	OwnerId       string                 `protobuf:"bytes,6,opt,name=owner_id,json=ownerId,proto3" json:"owner_id,omitempty"`                   // Clerk User ID of the node provider
+	// New hardware specs
+	CpuModel      string     `protobuf:"bytes,7,opt,name=cpu_model,json=cpuModel,proto3" json:"cpu_model,omitempty"`              // CPU model (e.g. "Intel Core i9-13900K")
+	CpuCores      int32      `protobuf:"varint,8,opt,name=cpu_cores,json=cpuCores,proto3" json:"cpu_cores,omitempty"`             // Physical cores
+	RamTotalMb    int64      `protobuf:"varint,9,opt,name=ram_total_mb,json=ramTotalMb,proto3" json:"ram_total_mb,omitempty"`     // Total RAM in Megabytes
+	DiskTotalGb   int64      `protobuf:"varint,10,opt,name=disk_total_gb,json=diskTotalGb,proto3" json:"disk_total_gb,omitempty"` // Total Disk Space in GB
+	OsInfo        string     `protobuf:"bytes,11,opt,name=os_info,json=osInfo,proto3" json:"os_info,omitempty"`                   // OS Info (e.g. "Ubuntu 22.04 LTS")
+	GpuInfo       []*GPUInfo `protobuf:"bytes,12,rep,name=gpu_info,json=gpuInfo,proto3" json:"gpu_info,omitempty"`                // List of GPUs in the node
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *NodeInfo) Reset() {
 	*x = NodeInfo{}
-	mi := &file_proto_depin_proto_msgTypes[0]
+	mi := &file_proto_depin_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -48,7 +124,7 @@ func (x *NodeInfo) String() string {
 func (*NodeInfo) ProtoMessage() {}
 
 func (x *NodeInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[0]
+	mi := &file_proto_depin_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -61,7 +137,7 @@ func (x *NodeInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeInfo.ProtoReflect.Descriptor instead.
 func (*NodeInfo) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{0}
+	return file_proto_depin_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *NodeInfo) GetId() string {
@@ -106,6 +182,48 @@ func (x *NodeInfo) GetOwnerId() string {
 	return ""
 }
 
+func (x *NodeInfo) GetCpuModel() string {
+	if x != nil {
+		return x.CpuModel
+	}
+	return ""
+}
+
+func (x *NodeInfo) GetCpuCores() int32 {
+	if x != nil {
+		return x.CpuCores
+	}
+	return 0
+}
+
+func (x *NodeInfo) GetRamTotalMb() int64 {
+	if x != nil {
+		return x.RamTotalMb
+	}
+	return 0
+}
+
+func (x *NodeInfo) GetDiskTotalGb() int64 {
+	if x != nil {
+		return x.DiskTotalGb
+	}
+	return 0
+}
+
+func (x *NodeInfo) GetOsInfo() string {
+	if x != nil {
+		return x.OsInfo
+	}
+	return ""
+}
+
+func (x *NodeInfo) GetGpuInfo() []*GPUInfo {
+	if x != nil {
+		return x.GpuInfo
+	}
+	return nil
+}
+
 // RegistrationResponse is returned after a node registration attempt
 type RegistrationResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -117,7 +235,7 @@ type RegistrationResponse struct {
 
 func (x *RegistrationResponse) Reset() {
 	*x = RegistrationResponse{}
-	mi := &file_proto_depin_proto_msgTypes[1]
+	mi := &file_proto_depin_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -129,7 +247,7 @@ func (x *RegistrationResponse) String() string {
 func (*RegistrationResponse) ProtoMessage() {}
 
 func (x *RegistrationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[1]
+	mi := &file_proto_depin_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -142,7 +260,7 @@ func (x *RegistrationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegistrationResponse.ProtoReflect.Descriptor instead.
 func (*RegistrationResponse) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{1}
+	return file_proto_depin_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *RegistrationResponse) GetStatus() string {
@@ -176,7 +294,7 @@ type JobRequest struct {
 
 func (x *JobRequest) Reset() {
 	*x = JobRequest{}
-	mi := &file_proto_depin_proto_msgTypes[2]
+	mi := &file_proto_depin_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -188,7 +306,7 @@ func (x *JobRequest) String() string {
 func (*JobRequest) ProtoMessage() {}
 
 func (x *JobRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[2]
+	mi := &file_proto_depin_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -201,7 +319,7 @@ func (x *JobRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobRequest.ProtoReflect.Descriptor instead.
 func (*JobRequest) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{2}
+	return file_proto_depin_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *JobRequest) GetJobId() string {
@@ -273,7 +391,7 @@ type Heartbeat struct {
 
 func (x *Heartbeat) Reset() {
 	*x = Heartbeat{}
-	mi := &file_proto_depin_proto_msgTypes[3]
+	mi := &file_proto_depin_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -285,7 +403,7 @@ func (x *Heartbeat) String() string {
 func (*Heartbeat) ProtoMessage() {}
 
 func (x *Heartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[3]
+	mi := &file_proto_depin_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -298,7 +416,7 @@ func (x *Heartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Heartbeat.ProtoReflect.Descriptor instead.
 func (*Heartbeat) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{3}
+	return file_proto_depin_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Heartbeat) GetNodeId() string {
@@ -340,7 +458,7 @@ type JobStats struct {
 
 func (x *JobStats) Reset() {
 	*x = JobStats{}
-	mi := &file_proto_depin_proto_msgTypes[4]
+	mi := &file_proto_depin_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -352,7 +470,7 @@ func (x *JobStats) String() string {
 func (*JobStats) ProtoMessage() {}
 
 func (x *JobStats) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[4]
+	mi := &file_proto_depin_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -365,7 +483,7 @@ func (x *JobStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobStats.ProtoReflect.Descriptor instead.
 func (*JobStats) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{4}
+	return file_proto_depin_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *JobStats) GetPeakCpuPercent() float64 {
@@ -395,7 +513,7 @@ type JobResult struct {
 
 func (x *JobResult) Reset() {
 	*x = JobResult{}
-	mi := &file_proto_depin_proto_msgTypes[5]
+	mi := &file_proto_depin_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -407,7 +525,7 @@ func (x *JobResult) String() string {
 func (*JobResult) ProtoMessage() {}
 
 func (x *JobResult) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[5]
+	mi := &file_proto_depin_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -420,7 +538,7 @@ func (x *JobResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobResult.ProtoReflect.Descriptor instead.
 func (*JobResult) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{5}
+	return file_proto_depin_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *JobResult) GetJobId() string {
@@ -462,7 +580,7 @@ type JobLog struct {
 
 func (x *JobLog) Reset() {
 	*x = JobLog{}
-	mi := &file_proto_depin_proto_msgTypes[6]
+	mi := &file_proto_depin_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -474,7 +592,7 @@ func (x *JobLog) String() string {
 func (*JobLog) ProtoMessage() {}
 
 func (x *JobLog) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[6]
+	mi := &file_proto_depin_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -487,7 +605,7 @@ func (x *JobLog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobLog.ProtoReflect.Descriptor instead.
 func (*JobLog) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{6}
+	return file_proto_depin_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *JobLog) GetJobId() string {
@@ -517,7 +635,7 @@ type ServerEvent struct {
 
 func (x *ServerEvent) Reset() {
 	*x = ServerEvent{}
-	mi := &file_proto_depin_proto_msgTypes[7]
+	mi := &file_proto_depin_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -529,7 +647,7 @@ func (x *ServerEvent) String() string {
 func (*ServerEvent) ProtoMessage() {}
 
 func (x *ServerEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[7]
+	mi := &file_proto_depin_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -542,7 +660,7 @@ func (x *ServerEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerEvent.ProtoReflect.Descriptor instead.
 func (*ServerEvent) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{7}
+	return file_proto_depin_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ServerEvent) GetEvent() isServerEvent_Event {
@@ -587,7 +705,7 @@ type AgentEvent struct {
 
 func (x *AgentEvent) Reset() {
 	*x = AgentEvent{}
-	mi := &file_proto_depin_proto_msgTypes[8]
+	mi := &file_proto_depin_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -599,7 +717,7 @@ func (x *AgentEvent) String() string {
 func (*AgentEvent) ProtoMessage() {}
 
 func (x *AgentEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[8]
+	mi := &file_proto_depin_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -612,7 +730,7 @@ func (x *AgentEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentEvent.ProtoReflect.Descriptor instead.
 func (*AgentEvent) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{8}
+	return file_proto_depin_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *AgentEvent) GetNodeId() string {
@@ -682,7 +800,12 @@ var File_proto_depin_proto protoreflect.FileDescriptor
 
 const file_proto_depin_proto_rawDesc = "" +
 	"\n" +
-	"\x11proto/depin.proto\x12\x05depin\"\xb5\x01\n" +
+	"\x11proto/depin.proto\x12\x05depin\"\x80\x01\n" +
+	"\aGPUInfo\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x17\n" +
+	"\avram_mb\x18\x02 \x01(\x03R\x06vramMb\x12%\n" +
+	"\x0edriver_version\x18\x03 \x01(\tR\rdriverVersion\x12!\n" +
+	"\fcuda_version\x18\x04 \x01(\tR\vcudaVersion\"\xf9\x02\n" +
 	"\bNodeInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
 	"\tgpu_model\x18\x02 \x01(\tR\bgpuModel\x12\x1d\n" +
@@ -690,7 +813,15 @@ const file_proto_depin_proto_rawDesc = "" +
 	"vram_total\x18\x03 \x01(\x04R\tvramTotal\x12\x1b\n" +
 	"\tvram_free\x18\x04 \x01(\x04R\bvramFree\x12%\n" +
 	"\x0edocker_version\x18\x05 \x01(\tR\rdockerVersion\x12\x19\n" +
-	"\bowner_id\x18\x06 \x01(\tR\aownerId\"H\n" +
+	"\bowner_id\x18\x06 \x01(\tR\aownerId\x12\x1b\n" +
+	"\tcpu_model\x18\a \x01(\tR\bcpuModel\x12\x1b\n" +
+	"\tcpu_cores\x18\b \x01(\x05R\bcpuCores\x12 \n" +
+	"\fram_total_mb\x18\t \x01(\x03R\n" +
+	"ramTotalMb\x12\"\n" +
+	"\rdisk_total_gb\x18\n" +
+	" \x01(\x03R\vdiskTotalGb\x12\x17\n" +
+	"\aos_info\x18\v \x01(\tR\x06osInfo\x12)\n" +
+	"\bgpu_info\x18\f \x03(\v2\x0e.depin.GPUInfoR\agpuInfo\"H\n" +
 	"\x14RegistrationResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"\x8c\x02\n" +
@@ -752,33 +883,35 @@ func file_proto_depin_proto_rawDescGZIP() []byte {
 	return file_proto_depin_proto_rawDescData
 }
 
-var file_proto_depin_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_proto_depin_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_proto_depin_proto_goTypes = []any{
-	(*NodeInfo)(nil),             // 0: depin.NodeInfo
-	(*RegistrationResponse)(nil), // 1: depin.RegistrationResponse
-	(*JobRequest)(nil),           // 2: depin.JobRequest
-	(*Heartbeat)(nil),            // 3: depin.Heartbeat
-	(*JobStats)(nil),             // 4: depin.JobStats
-	(*JobResult)(nil),            // 5: depin.JobResult
-	(*JobLog)(nil),               // 6: depin.JobLog
-	(*ServerEvent)(nil),          // 7: depin.ServerEvent
-	(*AgentEvent)(nil),           // 8: depin.AgentEvent
+	(*GPUInfo)(nil),              // 0: depin.GPUInfo
+	(*NodeInfo)(nil),             // 1: depin.NodeInfo
+	(*RegistrationResponse)(nil), // 2: depin.RegistrationResponse
+	(*JobRequest)(nil),           // 3: depin.JobRequest
+	(*Heartbeat)(nil),            // 4: depin.Heartbeat
+	(*JobStats)(nil),             // 5: depin.JobStats
+	(*JobResult)(nil),            // 6: depin.JobResult
+	(*JobLog)(nil),               // 7: depin.JobLog
+	(*ServerEvent)(nil),          // 8: depin.ServerEvent
+	(*AgentEvent)(nil),           // 9: depin.AgentEvent
 }
 var file_proto_depin_proto_depIdxs = []int32{
-	4, // 0: depin.JobResult.stats:type_name -> depin.JobStats
-	2, // 1: depin.ServerEvent.job_request:type_name -> depin.JobRequest
-	3, // 2: depin.AgentEvent.heartbeat:type_name -> depin.Heartbeat
-	5, // 3: depin.AgentEvent.job_result:type_name -> depin.JobResult
-	6, // 4: depin.AgentEvent.job_log:type_name -> depin.JobLog
-	0, // 5: depin.NodeService.Register:input_type -> depin.NodeInfo
-	8, // 6: depin.NodeService.StreamEvents:input_type -> depin.AgentEvent
-	1, // 7: depin.NodeService.Register:output_type -> depin.RegistrationResponse
-	7, // 8: depin.NodeService.StreamEvents:output_type -> depin.ServerEvent
-	7, // [7:9] is the sub-list for method output_type
-	5, // [5:7] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	0, // 0: depin.NodeInfo.gpu_info:type_name -> depin.GPUInfo
+	5, // 1: depin.JobResult.stats:type_name -> depin.JobStats
+	3, // 2: depin.ServerEvent.job_request:type_name -> depin.JobRequest
+	4, // 3: depin.AgentEvent.heartbeat:type_name -> depin.Heartbeat
+	6, // 4: depin.AgentEvent.job_result:type_name -> depin.JobResult
+	7, // 5: depin.AgentEvent.job_log:type_name -> depin.JobLog
+	1, // 6: depin.NodeService.Register:input_type -> depin.NodeInfo
+	9, // 7: depin.NodeService.StreamEvents:input_type -> depin.AgentEvent
+	2, // 8: depin.NodeService.Register:output_type -> depin.RegistrationResponse
+	8, // 9: depin.NodeService.StreamEvents:output_type -> depin.ServerEvent
+	8, // [8:10] is the sub-list for method output_type
+	6, // [6:8] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_proto_depin_proto_init() }
@@ -786,10 +919,10 @@ func file_proto_depin_proto_init() {
 	if File_proto_depin_proto != nil {
 		return
 	}
-	file_proto_depin_proto_msgTypes[7].OneofWrappers = []any{
+	file_proto_depin_proto_msgTypes[8].OneofWrappers = []any{
 		(*ServerEvent_JobRequest)(nil),
 	}
-	file_proto_depin_proto_msgTypes[8].OneofWrappers = []any{
+	file_proto_depin_proto_msgTypes[9].OneofWrappers = []any{
 		(*AgentEvent_Heartbeat)(nil),
 		(*AgentEvent_JobResult)(nil),
 		(*AgentEvent_JobLog)(nil),
@@ -800,7 +933,7 @@ func file_proto_depin_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_depin_proto_rawDesc), len(file_proto_depin_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
