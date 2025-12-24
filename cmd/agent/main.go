@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"sync"
 	"syscall"
 	"time"
@@ -491,6 +492,7 @@ func runDiscovery(ctx context.Context, cfg *config.Config, log *zap.Logger) (*No
 
 			// Fail fast if Docker is required
 			if cfg.DockerRequired {
+				printDockerInstructions()
 				log.Fatal("Docker is required but unavailable",
 					zap.Error(err),
 				)
@@ -529,6 +531,7 @@ func runDiscovery(ctx context.Context, cfg *config.Config, log *zap.Logger) (*No
 
 			// Fail fast if Docker is required
 			if cfg.DockerRequired {
+				printDockerInstructions()
 				log.Fatal("Docker is required but not available",
 					zap.String("error", dockerInfo.Error),
 				)
@@ -556,4 +559,37 @@ func runDiscovery(ctx context.Context, cfg *config.Config, log *zap.Logger) (*No
 	capacity.DiscoveryDuration = time.Since(startTime)
 
 	return capacity, nil
+}
+
+// printDockerInstructions prints user-friendly instructions for installing Docker
+func printDockerInstructions() {
+	fmt.Println("\n" +
+		"╔══════════════════════════════════════════════════════════════╗\n" +
+		"║                  DOCKER IS REQUIRED                          ║\n" +
+		"╠══════════════════════════════════════════════════════════════╣\n" +
+		"║  The Agent requires Docker to execute jobs.                  ║\n" +
+		"║  Please install and start Docker Desktop to continue.        ║\n" +
+		"║                                                              ║")
+
+	if runtime.GOOS == "windows" {
+		fmt.Println("" +
+			"║  Windows Installation:                                       ║\n" +
+			"║  1. Download: docs.docker.com/desktop/install/windows-install/ ║\n" +
+			"║  2. Run the installer                                        ║\n" +
+			"║  3. Start Docker Desktop                                     ║")
+	} else if runtime.GOOS == "darwin" {
+		fmt.Println("" +
+			"║  Mac Installation:                                           ║\n" +
+			"║  1. Download: docs.docker.com/desktop/install/mac-install/     ║\n" +
+			"║  2. Drag to Applications                                     ║\n" +
+			"║  3. Start Docker Desktop                                     ║")
+	} else {
+		fmt.Println("" +
+			"║  Linux Installation:                                         ║\n" +
+			"║  1. Follow guide: docs.docker.com/engine/install/            ║\n" +
+			"║  2. Ensure service is running: sudo systemctl start docker   ║\n" +
+			"║  3. Add user to group: sudo usermod -aG docker $USER         ║")
+	}
+	fmt.Println("" +
+		"╚══════════════════════════════════════════════════════════════╝\n")
 }

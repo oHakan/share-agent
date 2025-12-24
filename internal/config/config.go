@@ -52,7 +52,7 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		DevMode:             false,
-		DockerRequired:      false, // Default to optional for broader compatibility
+		DockerRequired:      true, // Default to optional for broader compatibility
 		LogLevel:            "info",
 		DockerTimeout:       5 * time.Second,
 		GPUTimeout:          10 * time.Second,
