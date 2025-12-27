@@ -163,6 +163,78 @@ func (d *NVMLDiscoverer) Discover(ctx context.Context) (*DiscoveryResult, error)
 	return result, nil
 }
 
+// GetUsageStats returns real-time usage statistics for all GPUs using nvidia-smi.
+func (d *NVMLDiscoverer) GetUsageStats(ctx context.Context) ([]GPUUsageStats, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	// Check context before starting
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	// Command: nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total,memory.free --format=csv,noheader,nounits
+	cmd := exec.CommandContext(ctx, "nvidia-smi",
+		"--query-gpu=index,name,utilization.gpu,memory.used,memory.total,memory.free",
+		"--format=csv,noheader,nounits")
+
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("nvidia-smi failed: %w", err)
+	}
+
+	reader := csv.NewReader(&stdout)
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse nvidia-smi output: %w", err)
+	}
+
+	var stats []GPUUsageStats
+	for _, record := range records {
+		if len(record) < 6 {
+			continue
+		}
+
+		s := GPUUsageStats{}
+
+		// Parse Index
+		if idx, err := strconv.Atoi(strings.TrimSpace(record[0])); err == nil {
+			s.Index = idx
+		}
+
+		// Name
+		s.Name = strings.TrimSpace(record[1])
+
+		// Utilization (0-100)
+		if util, err := strconv.ParseFloat(strings.TrimSpace(record[2]), 64); err == nil {
+			s.Utilization = util
+		}
+
+		// memory.used (MB) -> bytes
+		if used, err := strconv.ParseFloat(strings.TrimSpace(record[3]), 64); err == nil {
+			s.UsedVRAM = uint64(used * 1024 * 1024)
+		}
+
+		// memory.total (MB) -> bytes
+		if total, err := strconv.ParseFloat(strings.TrimSpace(record[4]), 64); err == nil {
+			s.TotalVRAM = uint64(total * 1024 * 1024)
+		}
+
+		// memory.free (MB) -> bytes
+		if free, err := strconv.ParseFloat(strings.TrimSpace(record[5]), 64); err == nil {
+			s.FreeVRAM = uint64(free * 1024 * 1024)
+		}
+
+		stats = append(stats, s)
+	}
+
+	return stats, nil
+}
+
 // Close releases any resources. No-op as nvidia-smi is run on-demand.
 func (d *NVMLDiscoverer) Close() error {
 	return nil

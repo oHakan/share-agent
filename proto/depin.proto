@@ -54,6 +54,12 @@ message Heartbeat {
   double cpu_percent = 2;  // Current CPU usage (0-100)
   double ram_percent = 3;  // Current RAM usage (0-100)
   string uptime = 4;       // System uptime as human-readable string (e.g., "2h 15m 30s")
+  double gpu_percent = 5;  // Current GPU usage (0-100)
+  double vram_percent = 6; // Current VRAM usage (0-100)
+  uint64 vram_total = 7;   // Total VRAM in bytes
+  uint64 vram_free = 8;    // Available VRAM in bytes
+  string gpu_model = 9;    // GPU Model name
+  string timestamp = 10;   // Timestamp of the heartbeat
 }
 
 // JobStats contains execution statistics for completed jobs

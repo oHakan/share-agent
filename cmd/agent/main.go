@@ -187,7 +187,11 @@ func registerAndStream(ctx context.Context, cfg *config.Config, capacity *NodeCa
 	jobHandler := createJobHandler(executor, log)
 
 	// Initialize telemetry collector
-	telemetryCollector := telemetry.NewGopsutilCollector()
+	// Create a persistent GPU discoverer for telemetry
+	gpuDiscoverer := gpu.NewNVMLDiscoverer()
+	defer gpuDiscoverer.Close()
+
+	telemetryCollector := telemetry.NewGopsutilCollector(gpuDiscoverer)
 
 	// Create telemetry provider for heartbeats
 	telemetryProvider := func() *pb.Heartbeat {
@@ -201,15 +205,22 @@ func registerAndStream(ctx context.Context, cfg *config.Config, capacity *NodeCa
 			log.Warn("Failed to collect telemetry", zap.Error(err))
 			// Return minimal heartbeat on error
 			return &pb.Heartbeat{
-				NodeId: nodeInfo.Id,
+				NodeId:    nodeInfo.Id,
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
 			}
 		}
 
 		return &pb.Heartbeat{
-			NodeId:     nodeInfo.Id,
-			CpuPercent: stats.CPUPercent,
-			RamPercent: stats.RAMPercent,
-			Uptime:     stats.Uptime,
+			NodeId:      nodeInfo.Id,
+			CpuPercent:  stats.CPUPercent,
+			RamPercent:  stats.RAMPercent,
+			Uptime:      stats.Uptime,
+			GpuPercent:  stats.GPUPercent,
+			VramPercent: stats.VRAMPercent,
+			VramTotal:   stats.VRAMTotal,
+			VramFree:    stats.VRAMFree,
+			GpuModel:    stats.GPUModel,
+			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 		}
 	}
 

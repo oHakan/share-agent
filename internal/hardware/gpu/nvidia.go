@@ -65,6 +65,19 @@ type Discoverer interface {
 	// It respects the provided context for cancellation/timeout.
 	Discover(ctx context.Context) (*DiscoveryResult, error)
 
+	// GetUsageStats returns real-time usage statistics for all GPUs.
+	GetUsageStats(ctx context.Context) ([]GPUUsageStats, error)
+
 	// Close releases any resources held by the discoverer.
 	Close() error
+}
+
+// GPUUsageStats contains real-time usage metrics for a GPU.
+type GPUUsageStats struct {
+	Index       int     `json:"index"`
+	Name        string  `json:"name"`
+	Utilization float64 `json:"utilization_percent"` // GPU Utilization (0-100)
+	UsedVRAM    uint64  `json:"used_vram_bytes"`
+	TotalVRAM   uint64  `json:"total_vram_bytes"`
+	FreeVRAM    uint64  `json:"free_vram_bytes"`
 }

@@ -40,6 +40,11 @@ func (d *NVMLDiscoverer) Discover(ctx context.Context) (*DiscoveryResult, error)
 	}, nil
 }
 
+// GetUsageStats returns real-time usage statistics.
+func (d *NVMLDiscoverer) GetUsageStats(ctx context.Context) ([]GPUUsageStats, error) {
+	return nil, nil
+}
+
 // Close releases any resources. No-op on unsupported platforms.
 func (d *NVMLDiscoverer) Close() error {
 	return nil

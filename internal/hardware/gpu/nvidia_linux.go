@@ -172,6 +172,13 @@ func (d *NVMLDiscoverer) getDeviceInfo(index int) (*GPUInfo, error) {
 	return info, nil
 }
 
+// GetUsageStats returns real-time usage statistics.
+// TODO: Implement using NVML similar to Discover
+func (d *NVMLDiscoverer) GetUsageStats(ctx context.Context) ([]GPUUsageStats, error) {
+	// For now return empty stats to satisfy interface
+	return nil, nil
+}
+
 // Close shuts down NVML and releases all resources.
 // This should be called when GPU discovery is no longer needed.
 func (d *NVMLDiscoverer) Close() error {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/depin-agent/agent/internal/hardware/gpu"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/host"
 	"github.com/shirou/gopsutil/v3/mem"
@@ -12,9 +13,14 @@ import (
 
 // TelemetryData contains the collected system stats
 type TelemetryData struct {
-	CPUPercent float64
-	RAMPercent float64
-	Uptime     string
+	CPUPercent  float64
+	RAMPercent  float64
+	Uptime      string
+	GPUPercent  float64
+	VRAMPercent float64
+	VRAMTotal   uint64
+	VRAMFree    uint64
+	GPUModel    string
 }
 
 // Collector defines the interface for collecting telemetry data
@@ -26,11 +32,14 @@ type Collector interface {
 type GopsutilCollector struct {
 	// bootTimeCached stores boot time to avoid syscalls on every collection
 	bootTimeCached uint64
+	gpuProvider    gpu.Discoverer
 }
 
 // NewGopsutilCollector creates a new telemetry collector
-func NewGopsutilCollector() *GopsutilCollector {
-	return &GopsutilCollector{}
+func NewGopsutilCollector(gpuProvider gpu.Discoverer) *GopsutilCollector {
+	return &GopsutilCollector{
+		gpuProvider: gpuProvider,
+	}
 }
 
 // Collect gathers the current system statistics
@@ -38,12 +47,6 @@ func (c *GopsutilCollector) Collect(ctx context.Context) (*TelemetryData, error)
 	data := &TelemetryData{}
 
 	// 1. CPU Usage (total across all cores)
-	// We use 0 as duration to get the instantaneous value since the last call,
-	// or if it's the first call, it might return 0. Ideally, we should measure over a small window,
-	// but for "instant" feel, 0 is often used with gopsutil, though it requires persistent state to be accurate.
-	// Actually, gopsutil cpu.Percent(0, false) returns the usage since the last call.
-	// However, calling it with 0 interval immediately after start might return 0.
-	// For a 3s heartbeat, we can just call it.
 	cpuPers, err := cpu.PercentWithContext(ctx, 0, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get cpu stats: %w", err)
@@ -60,7 +63,6 @@ func (c *GopsutilCollector) Collect(ctx context.Context) (*TelemetryData, error)
 	data.RAMPercent = vmStat.UsedPercent
 
 	// 3. Uptime
-	// We can try to get cached boot time or fetch it afresh
 	bootTime := c.bootTimeCached
 	if bootTime == 0 {
 		bt, err := host.BootTimeWithContext(ctx)
@@ -73,6 +75,24 @@ func (c *GopsutilCollector) Collect(ctx context.Context) (*TelemetryData, error)
 
 	uptimeSeconds := uint64(time.Now().Unix()) - bootTime
 	data.Uptime = formatUptime(uptimeSeconds)
+
+	// 4. GPU Usage
+	if c.gpuProvider != nil {
+		stats, err := c.gpuProvider.GetUsageStats(ctx)
+		if err == nil && len(stats) > 0 {
+			// Report the first GPU's stats for now
+			// The proto currently supports single GPU stats in Heartbeat
+			gpuStat := stats[0]
+			data.GPUPercent = gpuStat.Utilization
+			data.GPUModel = gpuStat.Name
+			data.VRAMTotal = gpuStat.TotalVRAM
+			data.VRAMFree = gpuStat.FreeVRAM
+
+			if gpuStat.TotalVRAM > 0 {
+				data.VRAMPercent = (float64(gpuStat.UsedVRAM) / float64(gpuStat.TotalVRAM)) * 100
+			}
+		}
+	}
 
 	return data, nil
 }
