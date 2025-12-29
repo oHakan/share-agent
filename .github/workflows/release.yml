@@ -30,3 +30,27 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Copy to Frontend
+        uses: actions/checkout@v4
+        with:
+          repository: oHakan/share-dashboard
+          token: ${{ secrets.FRONTEND_REPO_TOKEN }}
+          path: frontend
+
+      - name: Copy binaries to Frontend
+        run: |
+          mkdir -p frontend/public/downloads
+          # GoReleaser creates archives in dist/ root
+          cp dist/*.zip frontend/public/downloads/ 2>/dev/null || true
+          cp dist/*.tar.gz frontend/public/downloads/ 2>/dev/null || true
+          cp dist/checksums.txt frontend/public/downloads/ 2>/dev/null || true
+
+      - name: Push to Frontend
+        working-directory: frontend
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add public/downloads/
+          git commit -m "chore: update agent binaries to ${{ github.ref_name }}" || exit 0
+          git push
