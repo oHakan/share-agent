@@ -12,6 +12,14 @@ import (
 	"github.com/spf13/viper"
 )
 
+// Build-time variables injected via ldflags
+// Example: go build -ldflags "-X github.com/depin-agent/agent/internal/config.Version=1.0.0"
+var (
+	Version = "dev"     // Semantic version (e.g., "1.0.0")
+	Commit  = "unknown" // Git commit hash
+	Date    = "unknown" // Build date
+)
+
 // Config holds all configuration values for the agent.
 type Config struct {
 	// DevMode enables development-friendly logging and behaviors
@@ -56,7 +64,7 @@ func DefaultConfig() *Config {
 		LogLevel:            "info",
 		DockerTimeout:       5 * time.Second,
 		GPUTimeout:          10 * time.Second,
-		AgentVersion:        "0.1.0-mvp",
+		AgentVersion:        Version,
 		OrchestratorAddress: "trolley.proxy.rlwy.net:23340",
 		MaxRetries:          5,
 		RetryBackoff:        time.Second,

@@ -1,0 +1,79 @@
+# GoReleaser configuration for Nexus Agent
+# Documentation: https://goreleaser.com
+version: 2
+
+project_name: nexus-agent
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: nexus-agent
+    main: ./cmd/agent
+    binary: nexus-agent
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X github.com/depin-agent/agent/internal/config.Version={{.Version}}
+      - -X github.com/depin-agent/agent/internal/config.Commit={{.ShortCommit}}
+      - -X github.com/depin-agent/agent/internal/config.Date={{.Date}}
+
+archives:
+  - id: default
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    files:
+      - README*
+      - LICENSE*
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ .Tag }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: '{{ envOrDefault "GITHUB_REPOSITORY_OWNER" "your-org" }}'
+    name: agent
+  draft: false
+  prerelease: auto
+  name_template: "Nexus Agent {{.Version}}"
+  header: |
+    ## Nexus Agent {{.Version}}
+    
+    Cross-platform GPU compute agent for the Nexus network.
+  footer: |
+    ---
+    
+    **Full Changelog**: https://github.com/{{ .Env.GITHUB_REPOSITORY_OWNER }}/agent/compare/{{ .PreviousTag }}...{{ .Tag }}
