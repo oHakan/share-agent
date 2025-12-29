@@ -1,4 +1,4 @@
-//go:build !linux && !windows
+//go:build (!linux && !windows) || (linux && !cgo)
 
 // Package gpu provides NVIDIA GPU discovery functionality.
 // This file is built on platforms other than Linux and Windows (e.g., macOS)

@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && cgo
 
 // Package gpu provides NVIDIA GPU discovery functionality using NVML.
 // It detects all available NVIDIA GPUs and returns their specifications.
