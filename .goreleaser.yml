@@ -64,8 +64,8 @@ changelog:
 
 release:
   github:
-    owner: '{{ envOrDefault "GITHUB_REPOSITORY_OWNER" "your-org" }}'
-    name: agent
+    owner: oHakan
+    name: share-agent
   draft: false
   prerelease: auto
   name_template: "Nexus Agent {{.Version}}"
@@ -73,7 +73,4 @@ release:
     ## Nexus Agent {{.Version}}
     
     Cross-platform GPU compute agent for the Nexus network.
-  footer: |
-    ---
-    
-    **Full Changelog**: https://github.com/{{ .Env.GITHUB_REPOSITORY_OWNER }}/agent/compare/{{ .PreviousTag }}...{{ .Tag }}
+
