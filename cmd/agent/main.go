@@ -159,6 +159,7 @@ func registerAndStream(ctx context.Context, cfg *config.Config, capacity *NodeCa
 		MaxBackoff:          30 * time.Second,
 		ConnectionTimeout:   10 * time.Second,
 		CallTimeout:         10 * time.Second,
+		APIKey:              cfg.APIKey,
 	}
 
 	grpcClient := client.NewClient(clientConfig, log)

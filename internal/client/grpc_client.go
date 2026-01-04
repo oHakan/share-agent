@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	pb "github.com/depin-agent/agent/proto"
@@ -38,6 +39,9 @@ type ClientConfig struct {
 
 	// CallTimeout is the timeout for RPC calls
 	CallTimeout time.Duration
+
+	// APIKey is the authentication key sent with every request
+	APIKey string
 }
 
 // DefaultClientConfig returns a ClientConfig with sensible defaults.
@@ -116,10 +120,23 @@ func (c *Client) Connect(ctx context.Context) error {
 
 		// Create connection with timeout
 		connCtx, cancel := context.WithTimeout(ctx, c.config.ConnectionTimeout)
-		conn, err := grpc.DialContext(connCtx, c.config.OrchestratorAddress,
+
+		// Setup dial options
+		dialOpts := []grpc.DialOption{
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 			grpc.WithBlock(),
-		)
+		}
+
+		// Add API key interceptors if configured
+		if c.config.APIKey != "" {
+			dialOpts = append(dialOpts,
+				grpc.WithUnaryInterceptor(c.apiKeyUnaryInterceptor()),
+				grpc.WithStreamInterceptor(c.apiKeyStreamInterceptor()),
+			)
+			c.logger.Debug("API key authentication enabled")
+		}
+
+		conn, err := grpc.DialContext(connCtx, c.config.OrchestratorAddress, dialOpts...)
 		cancel()
 
 		if err != nil {
@@ -416,5 +433,23 @@ func isRetryable(err error) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// apiKeyUnaryInterceptor returns a unary interceptor that adds the API key to requests.
+func (c *Client) apiKeyUnaryInterceptor() grpc.UnaryClientInterceptor {
+	return func(ctx context.Context, method string, req, reply interface{},
+		cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-api-key", c.config.APIKey)
+		return invoker(ctx, method, req, reply, cc, opts...)
+	}
+}
+
+// apiKeyStreamInterceptor returns a stream interceptor that adds the API key to streams.
+func (c *Client) apiKeyStreamInterceptor() grpc.StreamClientInterceptor {
+	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn,
+		method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-api-key", c.config.APIKey)
+		return streamer(ctx, desc, cc, method, opts...)
 	}
 }

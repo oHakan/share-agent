@@ -52,8 +52,12 @@ type Config struct {
 	RetryBackoff time.Duration `mapstructure:"retry_backoff"`
 
 	// OwnerID is the Clerk User ID of the node provider
-	// Can be set via --owner/-o flag or NEXUS_OWNER_ID env var
+	// Can be set via --owner/-o flag or VORTIX_OWNER_ID env var
 	OwnerID string `mapstructure:"owner_id"`
+
+	// APIKey is the authentication key for the orchestrator
+	// Can be set via --api-key/-k flag or VORTIX_API_KEY env var
+	APIKey string `mapstructure:"api_key"`
 }
 
 // DefaultConfig returns a Config with sensible default values.
@@ -79,11 +83,13 @@ func Load() (*Config, error) {
 	v := viper.New()
 
 	// Define command-line flags
-	pflag.StringP("owner", "o", "", "Owner ID (Clerk User ID) of the node provider")
+	pflag.StringP("owner", "o", "", "Owner ID (Clerk User ID) - deprecated, use --api-key")
+	pflag.StringP("api-key", "k", "", "API Key for authentication (get from Vortix Cloud dashboard)")
 	pflag.Parse()
 
 	// Bind command-line flags to viper
 	_ = v.BindPFlag("owner_id", pflag.Lookup("owner"))
+	_ = v.BindPFlag("api_key", pflag.Lookup("api-key"))
 
 	// Set default values
 	defaults := DefaultConfig()
@@ -97,6 +103,7 @@ func Load() (*Config, error) {
 	v.SetDefault("max_retries", defaults.MaxRetries)
 	v.SetDefault("retry_backoff", defaults.RetryBackoff)
 	v.SetDefault("owner_id", defaults.OwnerID)
+	v.SetDefault("api_key", defaults.APIKey)
 
 	// Configure environment variable handling
 	// Environment variables are prefixed with AGENT_ and use underscores
@@ -127,10 +134,17 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 
-	// Check NEXUS_OWNER_ID env var as fallback if owner_id is not set
+	// Check VORTIX_OWNER_ID env var as fallback if owner_id is not set
 	if cfg.OwnerID == "" {
-		if nexusOwnerID := os.Getenv("NEXUS_OWNER_ID"); nexusOwnerID != "" {
-			cfg.OwnerID = nexusOwnerID
+		if vortixOwnerID := os.Getenv("VORTIX_OWNER_ID"); vortixOwnerID != "" {
+			cfg.OwnerID = vortixOwnerID
+		}
+	}
+
+	// Check VORTIX_API_KEY env var as fallback if api_key is not set
+	if cfg.APIKey == "" {
+		if vortixAPIKey := os.Getenv("VORTIX_API_KEY"); vortixAPIKey != "" {
+			cfg.APIKey = vortixAPIKey
 		}
 	}
 
