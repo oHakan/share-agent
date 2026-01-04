@@ -240,7 +240,13 @@ func (c *Client) StreamEvents(ctx context.Context, nodeInfo *pb.NodeInfo, handle
 	}
 	client := c.client
 	nodeID := nodeInfo.Id
+	apiKey := c.config.APIKey
 	c.mu.RUnlock()
+
+	// Add API key to context for stream authentication
+	if apiKey != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-api-key", apiKey)
+	}
 
 	// Establish the bidirectional stream
 	stream, err := client.StreamEvents(ctx)
