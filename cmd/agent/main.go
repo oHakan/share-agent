@@ -375,16 +375,6 @@ func capacityToNodeInfo(capacity *NodeCapacity, cfg *config.Config, log *zap.Log
 		nodeInfo.DockerVersion = capacity.Docker.ServerVersion
 	}
 
-	// Fill Owner ID from configuration
-	if cfg.OwnerID != "" {
-		nodeInfo.OwnerId = cfg.OwnerID
-		log.Info("Owner ID configured",
-			zap.String("owner_id", cfg.OwnerID),
-		)
-	} else {
-		panic("Owner ID not configured. Set via --owner flag or NEXUS_OWNER_ID env var")
-	}
-
 	return nodeInfo
 }
 

@@ -51,10 +51,6 @@ type Config struct {
 	// RetryBackoff is the initial backoff duration between retries
 	RetryBackoff time.Duration `mapstructure:"retry_backoff"`
 
-	// OwnerID is the Clerk User ID of the node provider
-	// Can be set via --owner/-o flag or VORTIX_OWNER_ID env var
-	OwnerID string `mapstructure:"owner_id"`
-
 	// APIKey is the authentication key for the orchestrator
 	// Can be set via --api-key/-k flag or VORTIX_API_KEY env var
 	APIKey string `mapstructure:"api_key"`
@@ -78,7 +74,6 @@ func DefaultConfig() *Config {
 // Load reads configuration from environment variables and config files.
 // Environment variables take precedence over config file values.
 // All environment variables should be prefixed with "AGENT_" (e.g., AGENT_DEV_MODE).
-// OwnerID can also be set via NEXUS_OWNER_ID env var or --owner/-o flag.
 func Load() (*Config, error) {
 	v := viper.New()
 
@@ -102,7 +97,6 @@ func Load() (*Config, error) {
 	v.SetDefault("orchestrator_address", defaults.OrchestratorAddress)
 	v.SetDefault("max_retries", defaults.MaxRetries)
 	v.SetDefault("retry_backoff", defaults.RetryBackoff)
-	v.SetDefault("owner_id", defaults.OwnerID)
 	v.SetDefault("api_key", defaults.APIKey)
 
 	// Configure environment variable handling
@@ -132,13 +126,6 @@ func Load() (*Config, error) {
 	cfg := &Config{}
 	if err := v.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
-	}
-
-	// Check VORTIX_OWNER_ID env var as fallback if owner_id is not set
-	if cfg.OwnerID == "" {
-		if vortixOwnerID := os.Getenv("VORTIX_OWNER_ID"); vortixOwnerID != "" {
-			cfg.OwnerID = vortixOwnerID
-		}
 	}
 
 	// Check VORTIX_API_KEY env var as fallback if api_key is not set

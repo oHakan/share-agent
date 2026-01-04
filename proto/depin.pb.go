@@ -7,11 +7,12 @@
 package proto
 
 import (
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
+
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -98,7 +99,6 @@ type NodeInfo struct {
 	VramTotal     uint64                 `protobuf:"varint,3,opt,name=vram_total,json=vramTotal,proto3" json:"vram_total,omitempty"`            // Total VRAM in bytes
 	VramFree      uint64                 `protobuf:"varint,4,opt,name=vram_free,json=vramFree,proto3" json:"vram_free,omitempty"`               // Available VRAM in bytes
 	DockerVersion string                 `protobuf:"bytes,5,opt,name=docker_version,json=dockerVersion,proto3" json:"docker_version,omitempty"` // Docker version installed on the node
-	OwnerId       string                 `protobuf:"bytes,6,opt,name=owner_id,json=ownerId,proto3" json:"owner_id,omitempty"`                   // Clerk User ID of the node provider
 	// New hardware specs
 	CpuModel      string     `protobuf:"bytes,7,opt,name=cpu_model,json=cpuModel,proto3" json:"cpu_model,omitempty"`              // CPU model (e.g. "Intel Core i9-13900K")
 	CpuCores      int32      `protobuf:"varint,8,opt,name=cpu_cores,json=cpuCores,proto3" json:"cpu_cores,omitempty"`             // Physical cores
@@ -171,13 +171,6 @@ func (x *NodeInfo) GetVramFree() uint64 {
 func (x *NodeInfo) GetDockerVersion() string {
 	if x != nil {
 		return x.DockerVersion
-	}
-	return ""
-}
-
-func (x *NodeInfo) GetOwnerId() string {
-	if x != nil {
-		return x.OwnerId
 	}
 	return ""
 }
