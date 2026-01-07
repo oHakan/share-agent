@@ -21,6 +21,7 @@ import (
 	"github.com/depin-agent/agent/internal/config"
 	"github.com/depin-agent/agent/internal/hardware/gpu"
 	"github.com/depin-agent/agent/internal/hardware/host"
+	"github.com/depin-agent/agent/internal/limits"
 	"github.com/depin-agent/agent/internal/runtime/docker"
 	"github.com/depin-agent/agent/internal/telemetry"
 	"github.com/depin-agent/agent/pkg/logger"
@@ -184,8 +185,27 @@ func registerAndStream(ctx context.Context, cfg *config.Config, capacity *NodeCa
 		zap.String("message", resp.Message),
 	)
 
-	// Create job handler that uses the Docker executor
-	jobHandler := createJobHandler(executor, log)
+	// Initialize resource limits store with defaults
+	limitsStore := limits.NewStore()
+
+	// Update limits from registration response if provided
+	if resp.ResourceLimits != nil {
+		limitsStore.Update(resp.ResourceLimits)
+		log.Info("Received initial resource limits",
+			zap.Float64("max_cpu", resp.ResourceLimits.MaxCpu),
+			zap.Float64("max_ram_gb", resp.ResourceLimits.MaxRamGb),
+			zap.Int64("max_volume_gb", resp.ResourceLimits.MaxVolumeGb),
+		)
+	} else {
+		log.Info("No resource limits from orchestrator, using defaults",
+			zap.Float64("max_cpu", limits.DefaultMaxCPU),
+			zap.Float64("max_ram_gb", limits.DefaultMaxRAMGB),
+			zap.Int64("max_volume_gb", limits.DefaultMaxVolumeGB),
+		)
+	}
+
+	// Create job handler that uses the Docker executor and limits
+	jobHandler := createJobHandler(executor, limitsStore, log)
 
 	// Initialize telemetry collector
 	// Create a persistent GPU discoverer for telemetry
@@ -237,7 +257,7 @@ func registerAndStream(ctx context.Context, cfg *config.Config, capacity *NodeCa
 			default:
 			}
 
-			err := grpcClient.StreamEvents(ctx, nodeInfo, jobHandler, telemetryProvider, heartbeatInterval)
+			err := grpcClient.StreamEvents(ctx, nodeInfo, jobHandler, telemetryProvider, heartbeatInterval, limitsStore)
 			if err != nil {
 				if ctx.Err() != nil {
 					// Context cancelled, shutting down
@@ -256,7 +276,8 @@ func registerAndStream(ctx context.Context, cfg *config.Config, capacity *NodeCa
 }
 
 // createJobHandler creates a job handler function that uses the Docker executor.
-func createJobHandler(executor *docker.Executor, log *zap.Logger) client.JobHandler {
+// It enforces resource limits by clamping job requests to the configured limits.
+func createJobHandler(executor *docker.Executor, limitsStore *limits.Store, log *zap.Logger) client.JobHandler {
 	return func(ctx context.Context, req *pb.JobRequest, logSender func(string)) *pb.JobResult {
 		result := &pb.JobResult{
 			JobId: req.JobId,
@@ -282,21 +303,27 @@ func createJobHandler(executor *docker.Executor, log *zap.Logger) client.JobHand
 			return result
 		}
 
+		// Clamp resource requests to configured limits
+		// This ensures containers never exceed the limits set by the orchestrator
+		clampedCPU, clampedMemoryMB := limitsStore.Clamp(float64(req.CpuLimit), req.MemoryLimitMb)
+
 		log.Info("Executing job with in-memory script injection",
 			zap.String("job_id", req.JobId),
 			zap.String("image", req.Image),
 			zap.Int("script_length", len(req.ScriptContent)),
 			zap.Strings("requirements", req.Requirements),
+			zap.Float64("cpu_limit", clampedCPU),
+			zap.Int64("memory_limit_mb", clampedMemoryMB),
 		)
 
-		// Build container config with resource limits and script content
+		// Build container config with clamped resource limits and script content
 		// Script is injected into container via tar archive (zero disk footprint)
 		containerConfig := docker.ContainerConfig{
-			MemoryLimitMB:  req.MemoryLimitMb,     // Memory limit in MB
-			CPULimit:       float64(req.CpuLimit), // CPU limit in cores
-			TimeoutSeconds: req.TimeoutSeconds,    // Execution timeout in seconds
-			Requirements:   req.Requirements,      // Python dependencies to install
-			Script:         req.ScriptContent,     // Script content injected into container
+			MemoryLimitMB:  clampedMemoryMB,    // Clamped memory limit in MB
+			CPULimit:       clampedCPU,         // Clamped CPU limit in cores
+			TimeoutSeconds: req.TimeoutSeconds, // Execution timeout in seconds
+			Requirements:   req.Requirements,   // Python dependencies to install
+			Script:         req.ScriptContent,  // Script content injected into container
 		}
 
 		// Run the container with log streaming callback and security sandbox

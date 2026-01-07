@@ -12,6 +12,13 @@ message GPUInfo {
   string cuda_version = 4;     // CUDA version (e.g. "12.2")
 }
 
+// ResourceLimits contains the maximum resource limits for containers on a node
+message ResourceLimits {
+  double max_cpu = 1;          // Max CPU cores (e.g., 2.0 for 2 cores)
+  double max_ram_gb = 2;       // Max RAM in GB
+  int64 max_volume_gb = 3;     // Max disk space in GB
+}
+
 // NodeInfo contains information about a GPU node/agent
 message NodeInfo {
   string id = 1;              // Unique identifier for the node
@@ -34,6 +41,7 @@ message NodeInfo {
 message RegistrationResponse {
   string status = 1;   // Status of the registration (e.g., "success", "error")
   string message = 2;  // Human-readable message about the registration result
+  ResourceLimits resource_limits = 3;  // Initial resource limits for the node
 }
 
 // JobRequest is sent from orchestrator to agent to execute a container
@@ -82,10 +90,17 @@ message JobLog {
   string line = 2;    // Single log line from container stdout/stderr
 }
 
+// ResourceLimitsUpdate is sent from orchestrator to agent when limits change
+message ResourceLimitsUpdate {
+  ResourceLimits limits = 1;   // New resource limits
+  string updated_at = 2;       // ISO8601 timestamp
+}
+
 // ServerEvent wraps messages sent from orchestrator to agent
 message ServerEvent {
   oneof event {
     JobRequest job_request = 1;
+    ResourceLimitsUpdate resource_limits_update = 2;
   }
 }
 

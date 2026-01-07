@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	"github.com/depin-agent/agent/internal/limits"
 	pb "github.com/depin-agent/agent/proto"
 )
 
@@ -231,8 +232,10 @@ func (c *Client) Register(ctx context.Context, nodeInfo *pb.NodeInfo) (*pb.Regis
 // The handler callback is invoked for each incoming JobRequest.
 // Results are automatically sent back to the orchestrator.
 //
+// If limitsStore is provided, resource limit updates are applied to it.
+//
 // This function blocks until the context is cancelled or an error occurs.
-func (c *Client) StreamEvents(ctx context.Context, nodeInfo *pb.NodeInfo, handler JobHandler, telemetryProvider func() *pb.Heartbeat, heartbeatInterval time.Duration) error {
+func (c *Client) StreamEvents(ctx context.Context, nodeInfo *pb.NodeInfo, handler JobHandler, telemetryProvider func() *pb.Heartbeat, heartbeatInterval time.Duration, limitsStore *limits.Store) error {
 	c.mu.RLock()
 	if c.client == nil {
 		c.mu.RUnlock()
@@ -352,6 +355,18 @@ func (c *Client) StreamEvents(ctx context.Context, nodeInfo *pb.NodeInfo, handle
 						)
 					}
 				}(jobReq)
+
+			case *pb.ServerEvent_ResourceLimitsUpdate:
+				update := event.ResourceLimitsUpdate
+				if limitsStore != nil && update != nil && update.Limits != nil {
+					limitsStore.Update(update.Limits)
+					c.logger.Info("Resource limits updated",
+						zap.String("updated_at", update.UpdatedAt),
+						zap.Float64("max_cpu", update.Limits.MaxCpu),
+						zap.Float64("max_ram_gb", update.Limits.MaxRamGb),
+						zap.Int64("max_volume_gb", update.Limits.MaxVolumeGb),
+					)
+				}
 
 			default:
 				c.logger.Warn("Unknown server event type received")

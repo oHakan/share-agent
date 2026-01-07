@@ -65,7 +65,7 @@ func DefaultConfig() *Config {
 		DockerTimeout:       5 * time.Second,
 		GPUTimeout:          10 * time.Second,
 		AgentVersion:        Version,
-		OrchestratorAddress: "trolley.proxy.rlwy.net:40519",
+		OrchestratorAddress: "localhost:50051",
 		MaxRetries:          5,
 		RetryBackoff:        time.Second,
 	}
