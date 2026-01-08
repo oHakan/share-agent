@@ -45,6 +45,7 @@ func NewExecutor(logger *zap.Logger) (*Executor, error) {
 type ContainerConfig struct {
 	MemoryLimitMB  int64    // Memory limit in megabytes (e.g., 512 for 512MB)
 	CPULimit       float64  // CPU limit in cores (e.g., 0.5 for half core, 1.0 for one core)
+	VolumeLimitGB  int64    // Volume/disk limit in GB (0 = no limit)
 	TimeoutSeconds int32    // Execution timeout in seconds (e.g., 60)
 	Requirements   []string // Python package dependencies to install before execution (e.g., ["numpy", "pandas==1.5.0"])
 	Script         string   // Python script content to execute (injected into container as task.py)
@@ -72,6 +73,7 @@ func (e *Executor) RunContainer(ctx context.Context, imageName string, config Co
 		zap.String("image", imageName),
 		zap.Int64("memory_limit_mb", config.MemoryLimitMB),
 		zap.Float64("cpu_limit", config.CPULimit),
+		zap.Int64("volume_limit_gb", config.VolumeLimitGB),
 		zap.Int32("timeout_seconds", config.TimeoutSeconds),
 		zap.Strings("requirements", config.Requirements),
 		zap.Int("script_size", len(config.Script)),
@@ -137,6 +139,48 @@ func (e *Executor) RunContainer(ctx context.Context, imageName string, config Co
 		zap.String("container_id", containerID),
 	)
 
+	// Step 5.5: Start volume monitoring goroutine if limit is set
+	var volumeExceeded bool
+	var volumeExceededBytes int64
+	volumeLimitBytes := config.VolumeLimitGB * 1024 * 1024 * 1024 // Convert GB to bytes
+
+	volumeCtx, volumeCancel := context.WithCancel(timeoutCtx)
+	defer volumeCancel()
+
+	if config.VolumeLimitGB > 0 {
+		go func() {
+			ticker := time.NewTicker(2 * time.Second)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-volumeCtx.Done():
+					return
+				case <-ticker.C:
+					// Check container disk usage
+					usedBytes, err := e.getContainerDiskUsage(volumeCtx, containerID)
+					if err != nil {
+						// Container might have stopped, ignore
+						continue
+					}
+
+					if usedBytes > volumeLimitBytes {
+						volumeExceeded = true
+						volumeExceededBytes = usedBytes
+						e.logger.Warn("Volume limit exceeded, killing container",
+							zap.String("container_id", containerID),
+							zap.Int64("used_bytes", usedBytes),
+							zap.Int64("limit_bytes", volumeLimitBytes),
+						)
+						// Kill the container
+						_ = e.client.ContainerKill(context.Background(), containerID, "SIGKILL")
+						return
+					}
+				}
+			}
+		}()
+	}
+
 	// Step 6: Stream logs in real-time while container is running
 	logs, err := e.streamLogs(timeoutCtx, containerID, logCallback)
 	if err != nil {
@@ -161,6 +205,18 @@ func (e *Executor) RunContainer(ctx context.Context, imageName string, config Co
 	select {
 	case err := <-errCh:
 		if err != nil {
+			// Check for volume limit exceeded first
+			if volumeExceeded {
+				usedGB := float64(volumeExceededBytes) / (1024 * 1024 * 1024)
+				volumeMsg := fmt.Sprintf("Volume limit exceeded (%.2f GB / %d GB)", usedGB, config.VolumeLimitGB)
+				e.logger.Error(volumeMsg,
+					zap.String("container_id", containerID),
+				)
+				if logCallback != nil {
+					logCallback(volumeMsg)
+				}
+				return logs + "\n" + volumeMsg, fmt.Errorf("volume limit exceeded")
+			}
 			// Check for timeout
 			if timeoutCtx.Err() == context.DeadlineExceeded {
 				timeoutMsg := "Process killed due to timeout."
@@ -176,6 +232,18 @@ func (e *Executor) RunContainer(ctx context.Context, imageName string, config Co
 			return "", fmt.Errorf("error waiting for container: %w", err)
 		}
 	case status := <-statusCh:
+		// Check for volume limit exceeded
+		if volumeExceeded {
+			usedGB := float64(volumeExceededBytes) / (1024 * 1024 * 1024)
+			volumeMsg := fmt.Sprintf("Volume limit exceeded (%.2f GB / %d GB)", usedGB, config.VolumeLimitGB)
+			e.logger.Error(volumeMsg,
+				zap.String("container_id", containerID),
+			)
+			if logCallback != nil {
+				logCallback(volumeMsg)
+			}
+			return logs + "\n" + volumeMsg, fmt.Errorf("volume limit exceeded")
+		}
 		if status.StatusCode != 0 {
 			if status.StatusCode == 137 {
 				timeoutMsg := "Memory Limit Exceeded."
@@ -186,7 +254,7 @@ func (e *Executor) RunContainer(ctx context.Context, imageName string, config Co
 				if logCallback != nil {
 					logCallback(timeoutMsg)
 				}
-				return "", fmt.Errorf("execution timeout: %w", timeoutCtx.Err())
+				return "", fmt.Errorf("memory limit exceeded")
 			}
 		}
 		e.logger.Debug("Container finished",
@@ -194,6 +262,18 @@ func (e *Executor) RunContainer(ctx context.Context, imageName string, config Co
 			zap.Int64("exit_code", status.StatusCode),
 		)
 	case <-timeoutCtx.Done():
+		// Check for volume limit exceeded first
+		if volumeExceeded {
+			usedGB := float64(volumeExceededBytes) / (1024 * 1024 * 1024)
+			volumeMsg := fmt.Sprintf("Volume limit exceeded (%.2f GB / %d GB)", usedGB, config.VolumeLimitGB)
+			e.logger.Error(volumeMsg,
+				zap.String("container_id", containerID),
+			)
+			if logCallback != nil {
+				logCallback(volumeMsg)
+			}
+			return logs + "\n" + volumeMsg, fmt.Errorf("volume limit exceeded")
+		}
 		// Timeout occurred - append clear message to logs
 		timeoutMsg := "Process killed due to timeout."
 		e.logger.Warn(timeoutMsg,
@@ -207,6 +287,22 @@ func (e *Executor) RunContainer(ctx context.Context, imageName string, config Co
 	}
 
 	return logs, nil
+}
+
+// getContainerDiskUsage returns the disk usage of a container's writable layer in bytes.
+func (e *Executor) getContainerDiskUsage(ctx context.Context, containerID string) (int64, error) {
+	// ContainerInspect with Size=true returns SizeRw (writable layer size)
+	inspect, err := e.client.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return 0, err
+	}
+
+	// SizeRw is the size of files that have been created or changed by this container
+	if inspect.SizeRw != nil {
+		return *inspect.SizeRw, nil
+	}
+
+	return 0, nil
 }
 
 // injectScript creates a tar archive containing the script in RAM and copies it into the container.

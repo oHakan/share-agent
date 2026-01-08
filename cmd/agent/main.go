@@ -306,6 +306,7 @@ func createJobHandler(executor *docker.Executor, limitsStore *limits.Store, log 
 		// Clamp resource requests to configured limits
 		// This ensures containers never exceed the limits set by the orchestrator
 		clampedCPU, clampedMemoryMB := limitsStore.Clamp(float64(req.CpuLimit), req.MemoryLimitMb)
+		_, _, volumeLimitGB := limitsStore.Get()
 
 		log.Info("Executing job with in-memory script injection",
 			zap.String("job_id", req.JobId),
@@ -314,6 +315,7 @@ func createJobHandler(executor *docker.Executor, limitsStore *limits.Store, log 
 			zap.Strings("requirements", req.Requirements),
 			zap.Float64("cpu_limit", clampedCPU),
 			zap.Int64("memory_limit_mb", clampedMemoryMB),
+			zap.Int64("volume_limit_gb", volumeLimitGB),
 		)
 
 		// Build container config with clamped resource limits and script content
@@ -321,6 +323,7 @@ func createJobHandler(executor *docker.Executor, limitsStore *limits.Store, log 
 		containerConfig := docker.ContainerConfig{
 			MemoryLimitMB:  clampedMemoryMB,    // Clamped memory limit in MB
 			CPULimit:       clampedCPU,         // Clamped CPU limit in cores
+			VolumeLimitGB:  volumeLimitGB,      // Volume limit in GB (monitored during execution)
 			TimeoutSeconds: req.TimeoutSeconds, // Execution timeout in seconds
 			Requirements:   req.Requirements,   // Python dependencies to install
 			Script:         req.ScriptContent,  // Script content injected into container
