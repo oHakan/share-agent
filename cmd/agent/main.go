@@ -253,8 +253,44 @@ func registerAndStream(ctx context.Context, cfg *config.Config, capacity *NodeCa
 		)
 	}
 
+	// User-friendly capacity summary
+	cpuCores := 0
+	ramGB := 0
+	if capacity.Host != nil {
+		cpuCores = capacity.Host.CPUCores
+		ramGB = int(capacity.Host.TotalRAM)
+	}
+
+	gpuLabel := "CPU-only"
+	if capacity.GPUs != nil && len(capacity.GPUs.GPUs) > 0 {
+		g := capacity.GPUs.GPUs[0]
+		gpuLabel = fmt.Sprintf("%s (%dGB)", g.Name, int(g.TotalVRAM))
+		if len(capacity.GPUs.GPUs) > 1 {
+			gpuLabel = fmt.Sprintf("%dx %s", len(capacity.GPUs.GPUs), gpuLabel)
+		}
+	}
+
+	maxCPU := limits.DefaultMaxCPU
+	maxRAM := limits.DefaultMaxRAMGB
+	maxVol := int64(limits.DefaultMaxVolumeGB)
+	if resp.ResourceLimits != nil {
+		maxCPU = resp.ResourceLimits.MaxCpu
+		maxRAM = resp.ResourceLimits.MaxRamGb
+		maxVol = resp.ResourceLimits.MaxVolumeGb
+	}
+
+	fmt.Println(formatter.Info(
+		"Capacity reported to Vortix Cloud",
+		fmt.Sprintf("CPU=%d cores RAM=%dGB GPU=%s", cpuCores, ramGB, gpuLabel),
+	))
+	fmt.Println(formatter.Info(
+		"Resource limits in effect",
+		fmt.Sprintf("max_cpu=%.2f max_ram=%.2fGB max_volume=%dGB", maxCPU, maxRAM, maxVol),
+		"You can adjust limits anytime from the Vortix dashboard (Nodes > Resource Limits).",
+	))
+
 	// Create job handler that uses the Docker executor and limits
-	jobHandler := createJobHandler(executor, limitsStore, log)
+	jobHandler := createJobHandler(executor, limitsStore, log, formatter)
 
 	// Initialize telemetry collector
 	// Create a persistent GPU discoverer for telemetry
@@ -345,11 +381,16 @@ func registerAndStream(ctx context.Context, cfg *config.Config, capacity *NodeCa
 
 // createJobHandler creates a job handler function that uses the Docker executor.
 // It enforces resource limits by clamping job requests to the configured limits.
-func createJobHandler(executor *docker.Executor, limitsStore *limits.Store, log *zap.Logger) client.JobHandler {
+func createJobHandler(executor *docker.Executor, limitsStore *limits.Store, log *zap.Logger, formatter *logger.Formatter) client.JobHandler {
 	return func(ctx context.Context, req *pb.JobRequest, logSender func(string)) *pb.JobResult {
 		result := &pb.JobResult{
 			JobId: req.JobId,
 		}
+
+		fmt.Println(formatter.Pending(
+			fmt.Sprintf("Job %s received", req.JobId),
+			fmt.Sprintf("image=%s timeout=%ds", req.Image, req.TimeoutSeconds),
+		))
 
 		// Check if we have an executor
 		if executor == nil {
@@ -386,6 +427,11 @@ func createJobHandler(executor *docker.Executor, limitsStore *limits.Store, log 
 			zap.Int64("volume_limit_gb", volumeLimitGB),
 		)
 
+		fmt.Println(formatter.Info(
+			fmt.Sprintf("Job %s started", req.JobId),
+			fmt.Sprintf("image=%s cpu=%.2f mem=%dMB vol=%dGB", req.Image, clampedCPU, clampedMemoryMB, volumeLimitGB),
+		))
+
 		// Build container config with clamped resource limits and script content
 		// Script is injected into container via tar archive (zero disk footprint)
 		containerConfig := docker.ContainerConfig{
@@ -409,6 +455,10 @@ func createJobHandler(executor *docker.Executor, limitsStore *limits.Store, log 
 				zap.String("job_id", req.JobId),
 				zap.Error(err),
 			)
+			fmt.Println(formatter.Error(
+				fmt.Sprintf("Job %s failed", req.JobId),
+				err.Error(),
+			))
 			return result
 		}
 
@@ -428,6 +478,11 @@ func createJobHandler(executor *docker.Executor, limitsStore *limits.Store, log 
 			zap.Int("output_length", len(output)),
 			zap.Int64("duration_ms", duration.Milliseconds()),
 		)
+
+		fmt.Println(formatter.Success(
+			fmt.Sprintf("Job %s completed", req.JobId),
+			fmt.Sprintf("duration=%dms output=%d chars", duration.Milliseconds(), len(output)),
+		))
 
 		return result
 	}
