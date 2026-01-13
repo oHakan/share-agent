@@ -67,6 +67,7 @@ message Heartbeat {
   uint64 vram_free = 8;    // Available VRAM in bytes
   string gpu_model = 9;    // GPU Model name
   string timestamp = 10;   // Timestamp of the heartbeat
+  int64 sent_timestamp_ms = 11; // Unix timestamp in milliseconds when heartbeat was sent (for RTT calculation)
 }
 
 // JobStats contains execution statistics for completed jobs
@@ -95,11 +96,18 @@ message ResourceLimitsUpdate {
   string updated_at = 2;       // ISO8601 timestamp
 }
 
+// HeartbeatAck is sent from orchestrator to agent as acknowledgment of heartbeat
+message HeartbeatAck {
+  int64 received_timestamp_ms = 1; // Orchestrator timestamp when heartbeat was received
+  int64 sent_timestamp_ms = 2;     // Echo of agent's sent_timestamp_ms for RTT calculation
+}
+
 // ServerEvent wraps messages sent from orchestrator to agent
 message ServerEvent {
   oneof event {
     JobRequest job_request = 1;
     ResourceLimitsUpdate resource_limits_update = 2;
+    HeartbeatAck heartbeat_ack = 3;
   }
 }
 

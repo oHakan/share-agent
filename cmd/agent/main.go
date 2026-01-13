@@ -211,6 +211,9 @@ func registerAndStream(ctx context.Context, cfg *config.Config, capacity *NodeCa
 
 	grpcClient := client.NewClient(clientConfig, log)
 
+	// Set formatter for user-friendly RTT logging
+	grpcClient.SetFormatter(formatter)
+
 	// Connect with retry
 	if err := grpcClient.Connect(ctx); err != nil {
 		return fmt.Errorf("connection failed: %w", err)
@@ -307,6 +310,9 @@ func registerAndStream(ctx context.Context, cfg *config.Config, capacity *NodeCa
 		tCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
 		defer cancel()
 
+		// Add timestamp for RTT calculation
+		sentTimestampMs := time.Now().UnixMilli()
+
 		stats, err := telemetryCollector.Collect(tCtx)
 		if err != nil {
 			// On some platforms (e.g., macOS), gopsutil returns "not implemented yet"
@@ -315,30 +321,33 @@ func registerAndStream(ctx context.Context, cfg *config.Config, capacity *NodeCa
 					log.Info("Telemetry not implemented on this platform; sending minimal heartbeat", zap.Error(err))
 				})
 				return &pb.Heartbeat{
-					NodeId:    nodeInfo.Id,
-					Timestamp: time.Now().UTC().Format(time.RFC3339),
+					NodeId:          nodeInfo.Id,
+					Timestamp:       time.Now().UTC().Format(time.RFC3339),
+					SentTimestampMs: sentTimestampMs,
 				}
 			}
 
 			log.Warn("Failed to collect telemetry", zap.Error(err))
 			// Return minimal heartbeat on error
 			return &pb.Heartbeat{
-				NodeId:    nodeInfo.Id,
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
+				NodeId:          nodeInfo.Id,
+				Timestamp:       time.Now().UTC().Format(time.RFC3339),
+				SentTimestampMs: sentTimestampMs,
 			}
 		}
 
 		return &pb.Heartbeat{
-			NodeId:      nodeInfo.Id,
-			CpuPercent:  stats.CPUPercent,
-			RamPercent:  stats.RAMPercent,
-			Uptime:      stats.Uptime,
-			GpuPercent:  stats.GPUPercent,
-			VramPercent: stats.VRAMPercent,
-			VramTotal:   stats.VRAMTotal,
-			VramFree:    stats.VRAMFree,
-			GpuModel:    stats.GPUModel,
-			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+			NodeId:          nodeInfo.Id,
+			CpuPercent:      stats.CPUPercent,
+			RamPercent:      stats.RAMPercent,
+			Uptime:          stats.Uptime,
+			GpuPercent:      stats.GPUPercent,
+			VramPercent:     stats.VRAMPercent,
+			VramTotal:       stats.VRAMTotal,
+			VramFree:        stats.VRAMFree,
+			GpuModel:        stats.GPUModel,
+			Timestamp:       time.Now().UTC().Format(time.RFC3339),
+			SentTimestampMs: sentTimestampMs,
 		}
 	}
 

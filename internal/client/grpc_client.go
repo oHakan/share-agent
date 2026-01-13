@@ -72,6 +72,16 @@ type Client struct {
 	client pb.NodeServiceClient
 	nodeID string
 
+	// RTT tracking
+	rttMu           sync.RWMutex
+	lastRTT         time.Duration
+	avgRTT          time.Duration
+	rttSamples      []time.Duration
+	maxRTTSamples   int
+	heartbeatSentAt map[int64]time.Time // sent_timestamp_ms -> send time
+	formatter       *logger.Formatter
+	rttLogCounter   int // Counter to throttle RTT logging (every Nth measurement)
+
 	mu     sync.RWMutex
 	closed bool
 }
@@ -82,8 +92,11 @@ func NewClient(config *ClientConfig, logger *zap.Logger) *Client {
 		config = DefaultClientConfig()
 	}
 	return &Client{
-		config: config,
-		logger: logger,
+		config:          config,
+		logger:          logger,
+		heartbeatSentAt: make(map[int64]time.Time),
+		maxRTTSamples:   10, // Keep last 10 samples for averaging
+		rttSamples:      make([]time.Duration, 0, 10),
 	}
 }
 
@@ -152,11 +165,11 @@ func (c *Client) Connect(ctx context.Context) error {
 
 		c.conn = conn
 		c.client = pb.NewNodeServiceClient(conn)
-		
+
 		// Sanitize address for logging (mask IP)
 		sanitizer := logger.NewSanitizer(true)
 		safeAddress := sanitizer.Sanitize(c.config.OrchestratorAddress)
-		
+
 		c.logger.Info("Connected to orchestrator",
 			zap.String("address", safeAddress),
 		)
@@ -374,6 +387,10 @@ func (c *Client) StreamEvents(ctx context.Context, nodeInfo *pb.NodeInfo, handle
 					)
 				}
 
+			case *pb.ServerEvent_HeartbeatAck:
+				ack := event.HeartbeatAck
+				c.handleHeartbeatAck(ack)
+
 			default:
 				c.logger.Warn("Unknown server event type received")
 			}
@@ -381,9 +398,16 @@ func (c *Client) StreamEvents(ctx context.Context, nodeInfo *pb.NodeInfo, handle
 	}()
 
 	// Send initial heartbeat
+	initialHeartbeatData := telemetryProvider()
+
+	// Track send time for RTT calculation
+	c.rttMu.Lock()
+	c.heartbeatSentAt[initialHeartbeatData.SentTimestampMs] = time.Now()
+	c.rttMu.Unlock()
+
 	initialHeartbeat := &pb.AgentEvent{
 		NodeId: nodeID,
-		Event:  &pb.AgentEvent_Heartbeat{Heartbeat: telemetryProvider()},
+		Event:  &pb.AgentEvent_Heartbeat{Heartbeat: initialHeartbeatData},
 	}
 	if err := stream.Send(initialHeartbeat); err != nil {
 		return fmt.Errorf("failed to send initial heartbeat: %w", err)
@@ -405,12 +429,19 @@ func (c *Client) StreamEvents(ctx context.Context, nodeInfo *pb.NodeInfo, handle
 			return err
 
 		case <-ticker.C:
-			heartbeat := &pb.AgentEvent{
+			heartbeat := telemetryProvider()
+
+			// Track send time for RTT calculation
+			c.rttMu.Lock()
+			c.heartbeatSentAt[heartbeat.SentTimestampMs] = time.Now()
+			c.rttMu.Unlock()
+
+			agentEvent := &pb.AgentEvent{
 				NodeId: nodeID,
-				Event:  &pb.AgentEvent_Heartbeat{Heartbeat: telemetryProvider()},
+				Event:  &pb.AgentEvent_Heartbeat{Heartbeat: heartbeat},
 			}
 			select {
-			case sendCh <- heartbeat:
+			case sendCh <- agentEvent:
 				c.logger.Debug("Heartbeat sent")
 			default:
 				c.logger.Warn("Heartbeat channel full, skipping")
@@ -470,6 +501,90 @@ func (c *Client) apiKeyUnaryInterceptor() grpc.UnaryClientInterceptor {
 		ctx = metadata.AppendToOutgoingContext(ctx, "x-api-key", c.config.APIKey)
 		return invoker(ctx, method, req, reply, cc, opts...)
 	}
+}
+
+// handleHeartbeatAck processes HeartbeatAck from orchestrator and calculates RTT.
+func (c *Client) handleHeartbeatAck(ack *pb.HeartbeatAck) {
+	if ack == nil {
+		return
+	}
+
+	c.rttMu.Lock()
+	defer c.rttMu.Unlock()
+
+	// Find the send time for this heartbeat
+	sendTime, found := c.heartbeatSentAt[ack.SentTimestampMs]
+	if !found {
+		c.logger.Debug("Received HeartbeatAck for unknown timestamp",
+			zap.Int64("sent_timestamp_ms", ack.SentTimestampMs),
+		)
+		return
+	}
+
+	// Calculate RTT
+	now := time.Now()
+	rtt := now.Sub(sendTime)
+	c.lastRTT = rtt
+
+	// Add to samples for averaging
+	c.rttSamples = append(c.rttSamples, rtt)
+	if len(c.rttSamples) > c.maxRTTSamples {
+		c.rttSamples = c.rttSamples[1:] // Keep last N samples
+	}
+
+	// Calculate average RTT
+	var sum time.Duration
+	for _, sample := range c.rttSamples {
+		sum += sample
+	}
+	c.avgRTT = sum / time.Duration(len(c.rttSamples))
+
+	// Clean up old sent timestamps (keep last 20 to handle out-of-order acks)
+	if len(c.heartbeatSentAt) > 20 {
+		oldest := int64(math.MaxInt64)
+		for ts := range c.heartbeatSentAt {
+			if ts < oldest {
+				oldest = ts
+			}
+		}
+		delete(c.heartbeatSentAt, oldest)
+	}
+
+	// Delete current timestamp
+	delete(c.heartbeatSentAt, ack.SentTimestampMs)
+
+	// Log RTT periodically (every 20 measurements = ~1 minute at 3s interval)
+	c.rttLogCounter++
+	if c.rttLogCounter >= 20 {
+		c.rttLogCounter = 0
+		if c.formatter != nil {
+			logMsg := c.formatter.Info(
+				"Network latency",
+				fmt.Sprintf("RTT: %dms (avg: %dms)", rtt.Milliseconds(), c.avgRTT.Milliseconds()),
+			)
+			c.logger.Debug(logMsg)
+		}
+	}
+
+	// Always log with debug level for monitoring
+	c.logger.Debug("Heartbeat RTT measured",
+		zap.Duration("rtt", rtt),
+		zap.Duration("avg_rtt", c.avgRTT),
+	)
+}
+
+// GetRTT returns the last measured RTT and average RTT.
+func (c *Client) GetRTT() (last, avg time.Duration) {
+	c.rttMu.RLock()
+	defer c.rttMu.RUnlock()
+	return c.lastRTT, c.avgRTT
+}
+
+// SetFormatter sets the user-friendly formatter for RTT logging.
+func (c *Client) SetFormatter(formatter *logger.Formatter) {
+	c.rttMu.Lock()
+	defer c.rttMu.Unlock()
+	c.formatter = formatter
 }
 
 // apiKeyStreamInterceptor returns a stream interceptor that adds the API key to streams.

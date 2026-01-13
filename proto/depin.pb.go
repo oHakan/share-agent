@@ -441,19 +441,20 @@ func (x *JobRequest) GetRequirements() []string {
 
 // Heartbeat contains real-time telemetry data for live graphs
 type Heartbeat struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`                  // Unique node identifier
-	CpuPercent    float64                `protobuf:"fixed64,2,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"`    // Current CPU usage (0-100)
-	RamPercent    float64                `protobuf:"fixed64,3,opt,name=ram_percent,json=ramPercent,proto3" json:"ram_percent,omitempty"`    // Current RAM usage (0-100)
-	Uptime        string                 `protobuf:"bytes,4,opt,name=uptime,proto3" json:"uptime,omitempty"`                                // System uptime as human-readable string (e.g., "2h 15m 30s")
-	GpuPercent    float64                `protobuf:"fixed64,5,opt,name=gpu_percent,json=gpuPercent,proto3" json:"gpu_percent,omitempty"`    // Current GPU usage (0-100)
-	VramPercent   float64                `protobuf:"fixed64,6,opt,name=vram_percent,json=vramPercent,proto3" json:"vram_percent,omitempty"` // Current VRAM usage (0-100)
-	VramTotal     uint64                 `protobuf:"varint,7,opt,name=vram_total,json=vramTotal,proto3" json:"vram_total,omitempty"`        // Total VRAM in bytes
-	VramFree      uint64                 `protobuf:"varint,8,opt,name=vram_free,json=vramFree,proto3" json:"vram_free,omitempty"`           // Available VRAM in bytes
-	GpuModel      string                 `protobuf:"bytes,9,opt,name=gpu_model,json=gpuModel,proto3" json:"gpu_model,omitempty"`            // GPU Model name
-	Timestamp     string                 `protobuf:"bytes,10,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                         // Timestamp of the heartbeat
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	NodeId          string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`                                // Unique node identifier
+	CpuPercent      float64                `protobuf:"fixed64,2,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"`                  // Current CPU usage (0-100)
+	RamPercent      float64                `protobuf:"fixed64,3,opt,name=ram_percent,json=ramPercent,proto3" json:"ram_percent,omitempty"`                  // Current RAM usage (0-100)
+	Uptime          string                 `protobuf:"bytes,4,opt,name=uptime,proto3" json:"uptime,omitempty"`                                              // System uptime as human-readable string (e.g., "2h 15m 30s")
+	GpuPercent      float64                `protobuf:"fixed64,5,opt,name=gpu_percent,json=gpuPercent,proto3" json:"gpu_percent,omitempty"`                  // Current GPU usage (0-100)
+	VramPercent     float64                `protobuf:"fixed64,6,opt,name=vram_percent,json=vramPercent,proto3" json:"vram_percent,omitempty"`               // Current VRAM usage (0-100)
+	VramTotal       uint64                 `protobuf:"varint,7,opt,name=vram_total,json=vramTotal,proto3" json:"vram_total,omitempty"`                      // Total VRAM in bytes
+	VramFree        uint64                 `protobuf:"varint,8,opt,name=vram_free,json=vramFree,proto3" json:"vram_free,omitempty"`                         // Available VRAM in bytes
+	GpuModel        string                 `protobuf:"bytes,9,opt,name=gpu_model,json=gpuModel,proto3" json:"gpu_model,omitempty"`                          // GPU Model name
+	Timestamp       string                 `protobuf:"bytes,10,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                                       // Timestamp of the heartbeat
+	SentTimestampMs int64                  `protobuf:"varint,11,opt,name=sent_timestamp_ms,json=sentTimestampMs,proto3" json:"sent_timestamp_ms,omitempty"` // Unix timestamp in milliseconds when heartbeat was sent (for RTT calculation)
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Heartbeat) Reset() {
@@ -554,6 +555,13 @@ func (x *Heartbeat) GetTimestamp() string {
 		return x.Timestamp
 	}
 	return ""
+}
+
+func (x *Heartbeat) GetSentTimestampMs() int64 {
+	if x != nil {
+		return x.SentTimestampMs
+	}
+	return 0
 }
 
 // JobStats contains execution statistics for completed jobs
@@ -784,6 +792,59 @@ func (x *ResourceLimitsUpdate) GetUpdatedAt() string {
 	return ""
 }
 
+// HeartbeatAck is sent from orchestrator to agent as acknowledgment of heartbeat
+type HeartbeatAck struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	ReceivedTimestampMs int64                  `protobuf:"varint,1,opt,name=received_timestamp_ms,json=receivedTimestampMs,proto3" json:"received_timestamp_ms,omitempty"` // Orchestrator timestamp when heartbeat was received
+	SentTimestampMs     int64                  `protobuf:"varint,2,opt,name=sent_timestamp_ms,json=sentTimestampMs,proto3" json:"sent_timestamp_ms,omitempty"`             // Echo of agent's sent_timestamp_ms for RTT calculation
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *HeartbeatAck) Reset() {
+	*x = HeartbeatAck{}
+	mi := &file_proto_depin_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HeartbeatAck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HeartbeatAck) ProtoMessage() {}
+
+func (x *HeartbeatAck) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_depin_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HeartbeatAck.ProtoReflect.Descriptor instead.
+func (*HeartbeatAck) Descriptor() ([]byte, []int) {
+	return file_proto_depin_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *HeartbeatAck) GetReceivedTimestampMs() int64 {
+	if x != nil {
+		return x.ReceivedTimestampMs
+	}
+	return 0
+}
+
+func (x *HeartbeatAck) GetSentTimestampMs() int64 {
+	if x != nil {
+		return x.SentTimestampMs
+	}
+	return 0
+}
+
 // ServerEvent wraps messages sent from orchestrator to agent
 type ServerEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -791,6 +852,7 @@ type ServerEvent struct {
 	//
 	//	*ServerEvent_JobRequest
 	//	*ServerEvent_ResourceLimitsUpdate
+	//	*ServerEvent_HeartbeatAck
 	Event         isServerEvent_Event `protobuf_oneof:"event"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -798,7 +860,7 @@ type ServerEvent struct {
 
 func (x *ServerEvent) Reset() {
 	*x = ServerEvent{}
-	mi := &file_proto_depin_proto_msgTypes[10]
+	mi := &file_proto_depin_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -810,7 +872,7 @@ func (x *ServerEvent) String() string {
 func (*ServerEvent) ProtoMessage() {}
 
 func (x *ServerEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[10]
+	mi := &file_proto_depin_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -823,7 +885,7 @@ func (x *ServerEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerEvent.ProtoReflect.Descriptor instead.
 func (*ServerEvent) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{10}
+	return file_proto_depin_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ServerEvent) GetEvent() isServerEvent_Event {
@@ -851,6 +913,15 @@ func (x *ServerEvent) GetResourceLimitsUpdate() *ResourceLimitsUpdate {
 	return nil
 }
 
+func (x *ServerEvent) GetHeartbeatAck() *HeartbeatAck {
+	if x != nil {
+		if x, ok := x.Event.(*ServerEvent_HeartbeatAck); ok {
+			return x.HeartbeatAck
+		}
+	}
+	return nil
+}
+
 type isServerEvent_Event interface {
 	isServerEvent_Event()
 }
@@ -863,9 +934,15 @@ type ServerEvent_ResourceLimitsUpdate struct {
 	ResourceLimitsUpdate *ResourceLimitsUpdate `protobuf:"bytes,2,opt,name=resource_limits_update,json=resourceLimitsUpdate,proto3,oneof"`
 }
 
+type ServerEvent_HeartbeatAck struct {
+	HeartbeatAck *HeartbeatAck `protobuf:"bytes,3,opt,name=heartbeat_ack,json=heartbeatAck,proto3,oneof"`
+}
+
 func (*ServerEvent_JobRequest) isServerEvent_Event() {}
 
 func (*ServerEvent_ResourceLimitsUpdate) isServerEvent_Event() {}
+
+func (*ServerEvent_HeartbeatAck) isServerEvent_Event() {}
 
 // AgentEvent wraps messages sent from agent to orchestrator
 type AgentEvent struct {
@@ -883,7 +960,7 @@ type AgentEvent struct {
 
 func (x *AgentEvent) Reset() {
 	*x = AgentEvent{}
-	mi := &file_proto_depin_proto_msgTypes[11]
+	mi := &file_proto_depin_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -895,7 +972,7 @@ func (x *AgentEvent) String() string {
 func (*AgentEvent) ProtoMessage() {}
 
 func (x *AgentEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[11]
+	mi := &file_proto_depin_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -908,7 +985,7 @@ func (x *AgentEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentEvent.ProtoReflect.Descriptor instead.
 func (*AgentEvent) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{11}
+	return file_proto_depin_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *AgentEvent) GetNodeId() string {
@@ -1017,7 +1094,7 @@ const file_proto_depin_proto_rawDesc = "" +
 	"\x0fmemory_limit_mb\x18\x05 \x01(\x03R\rmemoryLimitMb\x12\x1b\n" +
 	"\tcpu_limit\x18\x06 \x01(\x02R\bcpuLimit\x12'\n" +
 	"\x0ftimeout_seconds\x18\a \x01(\x05R\x0etimeoutSeconds\x12\"\n" +
-	"\frequirements\x18\b \x03(\tR\frequirements\"\xb9\x02\n" +
+	"\frequirements\x18\b \x03(\tR\frequirements\"\xe5\x02\n" +
 	"\tHeartbeat\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1f\n" +
 	"\vcpu_percent\x18\x02 \x01(\x01R\n" +
@@ -1033,7 +1110,8 @@ const file_proto_depin_proto_rawDesc = "" +
 	"\tvram_free\x18\b \x01(\x04R\bvramFree\x12\x1b\n" +
 	"\tgpu_model\x18\t \x01(\tR\bgpuModel\x12\x1c\n" +
 	"\ttimestamp\x18\n" +
-	" \x01(\tR\ttimestamp\"U\n" +
+	" \x01(\tR\ttimestamp\x12*\n" +
+	"\x11sent_timestamp_ms\x18\v \x01(\x03R\x0fsentTimestampMs\"U\n" +
 	"\bJobStats\x12(\n" +
 	"\x10peak_cpu_percent\x18\x01 \x01(\x01R\x0epeakCpuPercent\x12\x1f\n" +
 	"\vduration_ms\x18\x02 \x01(\x03R\n" +
@@ -1050,11 +1128,15 @@ const file_proto_depin_proto_rawDesc = "" +
 	"\x14ResourceLimitsUpdate\x12-\n" +
 	"\x06limits\x18\x01 \x01(\v2\x15.depin.ResourceLimitsR\x06limits\x12\x1d\n" +
 	"\n" +
-	"updated_at\x18\x02 \x01(\tR\tupdatedAt\"\xa1\x01\n" +
+	"updated_at\x18\x02 \x01(\tR\tupdatedAt\"n\n" +
+	"\fHeartbeatAck\x122\n" +
+	"\x15received_timestamp_ms\x18\x01 \x01(\x03R\x13receivedTimestampMs\x12*\n" +
+	"\x11sent_timestamp_ms\x18\x02 \x01(\x03R\x0fsentTimestampMs\"\xdd\x01\n" +
 	"\vServerEvent\x124\n" +
 	"\vjob_request\x18\x01 \x01(\v2\x11.depin.JobRequestH\x00R\n" +
 	"jobRequest\x12S\n" +
-	"\x16resource_limits_update\x18\x02 \x01(\v2\x1b.depin.ResourceLimitsUpdateH\x00R\x14resourceLimitsUpdateB\a\n" +
+	"\x16resource_limits_update\x18\x02 \x01(\v2\x1b.depin.ResourceLimitsUpdateH\x00R\x14resourceLimitsUpdate\x12:\n" +
+	"\rheartbeat_ack\x18\x03 \x01(\v2\x13.depin.HeartbeatAckH\x00R\fheartbeatAckB\a\n" +
 	"\x05event\"\xbd\x01\n" +
 	"\n" +
 	"AgentEvent\x12\x17\n" +
@@ -1080,7 +1162,7 @@ func file_proto_depin_proto_rawDescGZIP() []byte {
 	return file_proto_depin_proto_rawDescData
 }
 
-var file_proto_depin_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_proto_depin_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_proto_depin_proto_goTypes = []any{
 	(*GPUInfo)(nil),              // 0: depin.GPUInfo
 	(*ResourceLimits)(nil),       // 1: depin.ResourceLimits
@@ -1092,8 +1174,9 @@ var file_proto_depin_proto_goTypes = []any{
 	(*JobResult)(nil),            // 7: depin.JobResult
 	(*JobLog)(nil),               // 8: depin.JobLog
 	(*ResourceLimitsUpdate)(nil), // 9: depin.ResourceLimitsUpdate
-	(*ServerEvent)(nil),          // 10: depin.ServerEvent
-	(*AgentEvent)(nil),           // 11: depin.AgentEvent
+	(*HeartbeatAck)(nil),         // 10: depin.HeartbeatAck
+	(*ServerEvent)(nil),          // 11: depin.ServerEvent
+	(*AgentEvent)(nil),           // 12: depin.AgentEvent
 }
 var file_proto_depin_proto_depIdxs = []int32{
 	0,  // 0: depin.NodeInfo.gpu_info:type_name -> depin.GPUInfo
@@ -1102,18 +1185,19 @@ var file_proto_depin_proto_depIdxs = []int32{
 	1,  // 3: depin.ResourceLimitsUpdate.limits:type_name -> depin.ResourceLimits
 	4,  // 4: depin.ServerEvent.job_request:type_name -> depin.JobRequest
 	9,  // 5: depin.ServerEvent.resource_limits_update:type_name -> depin.ResourceLimitsUpdate
-	5,  // 6: depin.AgentEvent.heartbeat:type_name -> depin.Heartbeat
-	7,  // 7: depin.AgentEvent.job_result:type_name -> depin.JobResult
-	8,  // 8: depin.AgentEvent.job_log:type_name -> depin.JobLog
-	2,  // 9: depin.NodeService.Register:input_type -> depin.NodeInfo
-	11, // 10: depin.NodeService.StreamEvents:input_type -> depin.AgentEvent
-	3,  // 11: depin.NodeService.Register:output_type -> depin.RegistrationResponse
-	10, // 12: depin.NodeService.StreamEvents:output_type -> depin.ServerEvent
-	11, // [11:13] is the sub-list for method output_type
-	9,  // [9:11] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	10, // 6: depin.ServerEvent.heartbeat_ack:type_name -> depin.HeartbeatAck
+	5,  // 7: depin.AgentEvent.heartbeat:type_name -> depin.Heartbeat
+	7,  // 8: depin.AgentEvent.job_result:type_name -> depin.JobResult
+	8,  // 9: depin.AgentEvent.job_log:type_name -> depin.JobLog
+	2,  // 10: depin.NodeService.Register:input_type -> depin.NodeInfo
+	12, // 11: depin.NodeService.StreamEvents:input_type -> depin.AgentEvent
+	3,  // 12: depin.NodeService.Register:output_type -> depin.RegistrationResponse
+	11, // 13: depin.NodeService.StreamEvents:output_type -> depin.ServerEvent
+	12, // [12:14] is the sub-list for method output_type
+	10, // [10:12] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_proto_depin_proto_init() }
@@ -1121,11 +1205,12 @@ func file_proto_depin_proto_init() {
 	if File_proto_depin_proto != nil {
 		return
 	}
-	file_proto_depin_proto_msgTypes[10].OneofWrappers = []any{
+	file_proto_depin_proto_msgTypes[11].OneofWrappers = []any{
 		(*ServerEvent_JobRequest)(nil),
 		(*ServerEvent_ResourceLimitsUpdate)(nil),
+		(*ServerEvent_HeartbeatAck)(nil),
 	}
-	file_proto_depin_proto_msgTypes[11].OneofWrappers = []any{
+	file_proto_depin_proto_msgTypes[12].OneofWrappers = []any{
 		(*AgentEvent_Heartbeat)(nil),
 		(*AgentEvent_JobResult)(nil),
 		(*AgentEvent_JobLog)(nil),
@@ -1136,7 +1221,7 @@ func file_proto_depin_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_depin_proto_rawDesc), len(file_proto_depin_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
