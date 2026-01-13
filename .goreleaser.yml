@@ -1,17 +1,17 @@
-# GoReleaser configuration for Nexus Agent
+# GoReleaser configuration for Vortix Agent
 # Documentation: https://goreleaser.com
 version: 2
 
-project_name: nexus-agent
+project_name: vortix-agent
 
 before:
   hooks:
     - go mod tidy
 
 builds:
-  - id: nexus-agent
+  - id: vortix-agent
     main: ./cmd/agent
-    binary: nexus-agent
+    binary: vortix-agent
     env:
       - CGO_ENABLED=0
     goos:

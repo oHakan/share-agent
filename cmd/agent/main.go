@@ -54,6 +54,14 @@ type NodeCapacity struct {
 }
 
 func main() {
+	// Check for version-info flag early
+	for _, arg := range os.Args[1:] {
+		if arg == "--version-info" || arg == "-v" {
+			fmt.Println(config.GetVersionInfo())
+			os.Exit(0)
+		}
+	}
+
 	// Load configuration first
 	cfg, err := config.Load()
 	if err != nil {
@@ -69,6 +77,13 @@ func main() {
 		os.Exit(1)
 	}
 	defer logger.Sync(log)
+
+	// Initialize formatter for installation steps
+	formatter := logger.NewFormatter(!cfg.DevMode)
+
+	// Print installation header
+	fmt.Println(formatter.Header("Vortix Agent Installation"))
+	fmt.Println(formatter.Pending("Vortix Agent " + cfg.AgentVersion + " Installing..."))
 
 	log.Info("Starting DePIN GPU Agent",
 		zap.String("version", cfg.AgentVersion),
@@ -95,12 +110,39 @@ func main() {
 	}()
 
 	// Run discovery
-	capacity, err := runDiscovery(ctx, cfg, log)
+	capacity, err := runDiscovery(ctx, cfg, log, formatter)
 	if err != nil {
 		log.Fatal("Discovery failed",
 			zap.Error(err),
 		)
 	}
+
+	// Show system check result
+	gpuCount := 0
+	gpuModel := ""
+	if capacity.GPUs != nil && len(capacity.GPUs.GPUs) > 0 {
+		gpuCount = len(capacity.GPUs.GPUs)
+		gpuModel = capacity.GPUs.GPUs[0].Name
+	}
+	
+	ramGB := 0
+	cpuCores := 0
+	if capacity.Host != nil {
+		ramGB = int(capacity.Host.TotalRAM)
+		cpuCores = capacity.Host.CPUCores
+	}
+
+	// Format GPU info
+	gpuInfo := ""
+	if gpuCount > 0 {
+		gpuInfo = fmt.Sprintf("%dx %s", gpuCount, gpuModel)
+	} else {
+		gpuInfo = "CPU Only"
+	}
+
+	systemCheckMsg := formatter.Success("System check passed",
+		fmt.Sprintf("%d Cores, %dGB RAM, %s", cpuCores, ramGB, gpuInfo))
+	fmt.Println(systemCheckMsg)
 
 	// Output results as pretty JSON
 	outputJSON, err := json.MarshalIndent(capacity, "", "  ")
@@ -132,7 +174,7 @@ func main() {
 	}
 
 	// --- Connect to Orchestrator and Register ---
-	if err := registerAndStream(ctx, cfg, capacity, executor, log); err != nil {
+	if err := registerAndStream(ctx, cfg, capacity, executor, log, formatter); err != nil {
 		log.Error("Failed to register/stream with orchestrator",
 			zap.Error(err),
 		)
@@ -147,7 +189,10 @@ func main() {
 
 // registerAndStream connects to the orchestrator, registers this node,
 // and starts the bidirectional event stream for job processing.
-func registerAndStream(ctx context.Context, cfg *config.Config, capacity *NodeCapacity, executor *docker.Executor, log *zap.Logger) error {
+func registerAndStream(ctx context.Context, cfg *config.Config, capacity *NodeCapacity, executor *docker.Executor, log *zap.Logger, formatter *logger.Formatter) error {
+	// Show tunnel connection attempt
+	fmt.Println(formatter.Pending("Establishing secure tunnel"))
+
 	log.Info("Connecting to orchestrator",
 		zap.String("address", cfg.OrchestratorAddress),
 	)
@@ -179,6 +224,9 @@ func registerAndStream(ctx context.Context, cfg *config.Config, capacity *NodeCa
 		grpcClient.Close()
 		return fmt.Errorf("registration failed: %w", err)
 	}
+
+	// Show registration success
+	fmt.Println(formatter.Success("Secure tunnel established"))
 
 	log.Info("Registration successful",
 		zap.String("status", resp.Status),
@@ -271,6 +319,13 @@ func registerAndStream(ctx context.Context, cfg *config.Config, capacity *NodeCa
 			}
 		}
 	}()
+
+	// Show node is online
+	nodeName := nodeInfo.Id
+	if len(nodeName) > 20 {
+		nodeName = "Vortix-Agent"
+	}
+	fmt.Println(formatter.Info(fmt.Sprintf("Node \"%s\" is now ONLINE", nodeName)))
 
 	return nil
 }
@@ -410,7 +465,7 @@ func capacityToNodeInfo(capacity *NodeCapacity, cfg *config.Config, log *zap.Log
 
 // runDiscovery performs all discovery operations concurrently.
 // It uses WaitGroups and channels to coordinate parallel operations.
-func runDiscovery(ctx context.Context, cfg *config.Config, log *zap.Logger) (*NodeCapacity, error) {
+func runDiscovery(ctx context.Context, cfg *config.Config, log *zap.Logger, formatter *logger.Formatter) (*NodeCapacity, error) {
 	startTime := time.Now()
 
 	capacity := &NodeCapacity{

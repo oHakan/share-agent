@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/depin-agent/agent/internal/limits"
+	"github.com/depin-agent/agent/pkg/logger"
 	pb "github.com/depin-agent/agent/proto"
 )
 
@@ -151,8 +152,13 @@ func (c *Client) Connect(ctx context.Context) error {
 
 		c.conn = conn
 		c.client = pb.NewNodeServiceClient(conn)
+		
+		// Sanitize address for logging (mask IP)
+		sanitizer := logger.NewSanitizer(true)
+		safeAddress := sanitizer.Sanitize(c.config.OrchestratorAddress)
+		
 		c.logger.Info("Connected to orchestrator",
-			zap.String("address", c.config.OrchestratorAddress),
+			zap.String("address", safeAddress),
 		)
 		return nil
 	}

@@ -174,3 +174,9 @@ func (c *Config) String() string {
 		c.DevMode, c.DockerRequired, c.LogLevel, c.DockerTimeout, c.GPUTimeout, c.AgentVersion,
 	)
 }
+
+// GetVersionInfo returns formatted version information.
+// This is built at compile time with ldflags.
+func GetVersionInfo() string {
+	return fmt.Sprintf("Vortix Agent %s (commit: %s, built: %s)", Version, Commit, Date)
+}
