@@ -45,7 +45,15 @@ jobs:
           cp dist/*.zip frontend/public/downloads/ 2>/dev/null || true
           cp dist/*.tar.gz frontend/public/downloads/ 2>/dev/null || true
           cp dist/checksums.txt frontend/public/downloads/ 2>/dev/null || true
-
+ 
+      - name: Update Agent Version in ConnectNodeCard
+        working-directory: frontend
+        run: |
+         VERSION=${{ github.ref_name }}
+         VERSION=${VERSION#v}  # v0.2.4 → 0.2.4
+         sed -i "s/const AGENT_VERSION = '[^']*'/const AGENT_VERSION = '$VERSION'/" components/ConnectNodeCard.tsx
+         git add components/ConnectNodeCard.tsx
+       
       - name: Push to Frontend
         working-directory: frontend
         run: |
