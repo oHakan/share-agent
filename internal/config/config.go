@@ -15,9 +15,11 @@ import (
 // Build-time variables injected via ldflags
 // Example: go build -ldflags "-X github.com/depin-agent/agent/internal/config.Version=1.0.0"
 var (
-	Version = "dev"     // Semantic version (e.g., "1.0.0")
-	Commit  = "unknown" // Git commit hash
-	Date    = "unknown" // Build date
+	Version                = "dev"             // Semantic version (e.g., "1.0.0")
+	Commit                 = "unknown"         // Git commit hash
+	Date                   = "unknown"         // Build date
+	DevMode                = "true"            // Development mode (true/false) - overridden by goreleaser
+	OrchestratorAddressVar = "localhost:50051" // Orchestrator address - overridden by goreleaser for production
 )
 
 // Config holds all configuration values for the agent.
@@ -58,14 +60,17 @@ type Config struct {
 
 // DefaultConfig returns a Config with sensible default values.
 func DefaultConfig() *Config {
+	// Parse DevMode from build-time variable (default: true for development)
+	devMode := strings.ToLower(DevMode) == "true"
+
 	return &Config{
-		DevMode:             false,
+		DevMode:             devMode,
 		DockerRequired:      true, // Default to optional for broader compatibility
 		LogLevel:            "info",
 		DockerTimeout:       5 * time.Second,
 		GPUTimeout:          10 * time.Second,
 		AgentVersion:        Version,
-		OrchestratorAddress: "localhost:50051",
+		OrchestratorAddress: OrchestratorAddressVar,
 		MaxRetries:          5,
 		RetryBackoff:        time.Second,
 	}

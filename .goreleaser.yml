@@ -29,6 +29,8 @@ builds:
       - -X github.com/depin-agent/agent/internal/config.Version={{.Version}}
       - -X github.com/depin-agent/agent/internal/config.Commit={{.ShortCommit}}
       - -X github.com/depin-agent/agent/internal/config.Date={{.Date}}
+      - -X github.com/depin-agent/agent/internal/config.DevMode=false
+      - -X github.com/depin-agent/agent/internal/config.OrchestratorAddressVar=trolley.proxy.rlwy.net:40519
 
 archives:
   - id: default

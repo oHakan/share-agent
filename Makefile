@@ -4,13 +4,15 @@
 VERSION ?= $(shell git describe --tags --always)
 COMMIT ?= $(shell git rev-parse --short HEAD)
 DATE ?= $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
+DEV_MODE ?= true  # Local development mode (true), can be overridden
 
 # Build paths
 BINARY_NAME := vortix-agent
 LDFLAGS := -ldflags "-s -w \
 	-X github.com/depin-agent/agent/internal/config.Version=$(VERSION) \
 	-X github.com/depin-agent/agent/internal/config.Commit=$(COMMIT) \
-	-X github.com/depin-agent/agent/internal/config.Date=$(DATE)"
+	-X github.com/depin-agent/agent/internal/config.Date=$(DATE) \
+	-X github.com/depin-agent/agent/internal/config.DevMode=$(DEV_MODE)"
 
 # Default target
 all: build
