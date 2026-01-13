@@ -41,7 +41,9 @@ jobs:
       - name: Copy binaries to Frontend
         run: |
           mkdir -p frontend/public/downloads
-          # GoReleaser creates archives in dist/ root
+          # Clean up old binaries first
+          rm -f frontend/public/downloads/*.zip frontend/public/downloads/*.tar.gz frontend/public/downloads/checksums.txt
+          # Copy new binaries
           cp dist/*.zip frontend/public/downloads/ 2>/dev/null || true
           cp dist/*.tar.gz frontend/public/downloads/ 2>/dev/null || true
           cp dist/checksums.txt frontend/public/downloads/ 2>/dev/null || true
