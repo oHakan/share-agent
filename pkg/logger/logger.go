@@ -20,11 +20,14 @@ func New(devMode bool) (*zap.Logger, error) {
 		config = zap.NewDevelopmentConfig()
 		config.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
 		config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+		config.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
 	} else {
 		// Production configuration: JSON structured logs for machine parsing
 		config = zap.NewProductionConfig()
 		config.EncoderConfig.TimeKey = "timestamp"
 		config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+		// Suppress verbose info logs in production to reduce console noise
+		config.Level = zap.NewAtomicLevelAt(zap.WarnLevel)
 	}
 
 	// Build and return the logger

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -124,7 +125,7 @@ func main() {
 		gpuCount = len(capacity.GPUs.GPUs)
 		gpuModel = capacity.GPUs.GPUs[0].Name
 	}
-	
+
 	ramGB := 0
 	cpuCores := 0
 	if capacity.Host != nil {
@@ -261,6 +262,7 @@ func registerAndStream(ctx context.Context, cfg *config.Config, capacity *NodeCa
 	defer gpuDiscoverer.Close()
 
 	telemetryCollector := telemetry.NewGopsutilCollector(gpuDiscoverer)
+	warnOnce := &sync.Once{}
 
 	// Create telemetry provider for heartbeats
 	telemetryProvider := func() *pb.Heartbeat {
@@ -271,6 +273,17 @@ func registerAndStream(ctx context.Context, cfg *config.Config, capacity *NodeCa
 
 		stats, err := telemetryCollector.Collect(tCtx)
 		if err != nil {
+			// On some platforms (e.g., macOS), gopsutil returns "not implemented yet"
+			if strings.Contains(strings.ToLower(err.Error()), "not implemented") {
+				warnOnce.Do(func() {
+					log.Info("Telemetry not implemented on this platform; sending minimal heartbeat", zap.Error(err))
+				})
+				return &pb.Heartbeat{
+					NodeId:    nodeInfo.Id,
+					Timestamp: time.Now().UTC().Format(time.RFC3339),
+				}
+			}
+
 			log.Warn("Failed to collect telemetry", zap.Error(err))
 			// Return minimal heartbeat on error
 			return &pb.Heartbeat{

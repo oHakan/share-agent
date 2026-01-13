@@ -3,6 +3,8 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/depin-agent/agent/internal/hardware/gpu"
@@ -49,9 +51,17 @@ func (c *GopsutilCollector) Collect(ctx context.Context) (*TelemetryData, error)
 	// 1. CPU Usage (total across all cores)
 	cpuPers, err := cpu.PercentWithContext(ctx, 0, false)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get cpu stats: %w", err)
-	}
-	if len(cpuPers) > 0 {
+		// gopsutil darwin: "not implemented yet"; fallback to manual sampling
+		if runtime.GOOS == "darwin" && isNotImplemented(err) {
+			pct, fbErr := sampleCPUPercentDarwin(ctx)
+			if fbErr != nil {
+				return nil, fmt.Errorf("failed to get cpu stats (darwin fallback): %w", fbErr)
+			}
+			data.CPUPercent = pct
+		} else {
+			return nil, fmt.Errorf("failed to get cpu stats: %w", err)
+		}
+	} else if len(cpuPers) > 0 {
 		data.CPUPercent = cpuPers[0]
 	}
 
@@ -116,4 +126,50 @@ func formatUptime(seconds uint64) string {
 		return fmt.Sprintf("%dm %ds", minutes, secs)
 	}
 	return fmt.Sprintf("%ds", secs)
+}
+
+// isNotImplemented reports whether an error is a platform "not implemented" case.
+func isNotImplemented(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "not implemented")
+}
+
+// sampleCPUPercentDarwin computes CPU usage on darwin by sampling Times twice.
+func sampleCPUPercentDarwin(ctx context.Context) (float64, error) {
+	t1, err := cpu.TimesWithContext(ctx, false)
+	if err != nil {
+		return 0, err
+	}
+	if len(t1) == 0 {
+		return 0, fmt.Errorf("no cpu times")
+	}
+
+	select {
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	t2, err := cpu.TimesWithContext(ctx, false)
+	if err != nil {
+		return 0, err
+	}
+	if len(t2) == 0 {
+		return 0, fmt.Errorf("no cpu times on second sample")
+	}
+
+	d1, d2 := t1[0], t2[0]
+	du := d2.User - d1.User
+	ds := d2.System - d1.System
+	di := d2.Idle - d1.Idle
+	dn := d2.Nice - d1.Nice
+
+	total := du + ds + di + dn
+	if total <= 0 {
+		return 0, fmt.Errorf("invalid cpu delta: total <= 0")
+	}
+
+	return (du + ds) * 100 / total, nil
 }
