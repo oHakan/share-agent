@@ -13,19 +13,37 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"go.uber.org/zap"
 )
 
+const (
+	// isolatedNetworkName is the name of the Docker network used for all job containers.
+	// This network allows internet egress but blocks access to private/internal subnets
+	// (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16) and the Docker host.
+	isolatedNetworkName = "vortix-isolated"
+
+	// isolatedNetworkSubnet is the subnet for the isolated network.
+	// Chosen from a narrow range to avoid conflicts with common LAN subnets.
+	isolatedNetworkSubnet = "172.30.0.0/24"
+
+	// isolatedNetworkGateway is the gateway for the isolated network.
+	isolatedNetworkGateway = "172.30.0.1"
+)
+
 // Executor handles Docker container execution for job processing.
 type Executor struct {
-	client *client.Client
-	logger *zap.Logger
+	client    *client.Client
+	logger    *zap.Logger
+	networkID string // ID of the vortix-isolated network
 }
 
 // NewExecutor creates a new Docker container executor.
 // It creates a client from environment variables (DOCKER_HOST, etc.)
+// and sets up an isolated Docker network that allows internet egress
+// but blocks all access to private/internal subnets and the host.
 func NewExecutor(logger *zap.Logger) (*Executor, error) {
 	cli, err := client.NewClientWithOpts(
 		client.FromEnv,
@@ -35,10 +53,186 @@ func NewExecutor(logger *zap.Logger) (*Executor, error) {
 		return nil, fmt.Errorf("failed to create Docker client: %w", err)
 	}
 
-	return &Executor{
+	e := &Executor{
 		client: cli,
 		logger: logger,
-	}, nil
+	}
+
+	if err := e.ensureIsolatedNetwork(context.Background()); err != nil {
+		cli.Close()
+		return nil, fmt.Errorf("failed to setup isolated network: %w", err)
+	}
+
+	return e, nil
+}
+
+// ensureIsolatedNetwork creates (or reuses) the vortix-isolated Docker network.
+// The network allows outbound internet access but blocks private subnets via
+// iptables rules applied after network creation.
+func (e *Executor) ensureIsolatedNetwork(ctx context.Context) error {
+	// Check if network already exists (from a previous agent run)
+	networks, err := e.client.NetworkList(ctx, network.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list networks: %w", err)
+	}
+
+	for _, n := range networks {
+		if n.Name == isolatedNetworkName {
+			e.networkID = n.ID
+			e.logger.Info("Reusing existing isolated network",
+				zap.String("network_id", n.ID),
+			)
+			return e.applyNetworkFirewallRules()
+		}
+	}
+
+	// Create new network with ICC disabled (no inter-container communication)
+	resp, err := e.client.NetworkCreate(ctx, isolatedNetworkName, network.CreateOptions{
+		Driver: "bridge",
+		IPAM: &network.IPAM{
+			Config: []network.IPAMConfig{
+				{
+					Subnet:  isolatedNetworkSubnet,
+					Gateway: isolatedNetworkGateway,
+				},
+			},
+		},
+		Options: map[string]string{
+			"com.docker.network.bridge.enable_icc": "false", // Block container-to-container
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create isolated network: %w", err)
+	}
+
+	e.networkID = resp.ID
+	e.logger.Info("Created isolated network",
+		zap.String("network_id", resp.ID),
+		zap.String("subnet", isolatedNetworkSubnet),
+	)
+
+	return e.applyNetworkFirewallRules()
+}
+
+// applyNetworkFirewallRules adds iptables rules to block traffic from the isolated network
+// to all private/internal subnets. This ensures containers can reach the public internet
+// but cannot access the host machine, LAN, or other internal services.
+//
+// Blocked ranges:
+//   - 10.0.0.0/8      (Class A private)
+//   - 172.16.0.0/12   (Class B private, includes Docker default bridge 172.17.0.0/16)
+//   - 192.168.0.0/16  (Class C private, most home/office LANs)
+//   - 169.254.0.0/16  (Link-local / APIPA)
+//   - 127.0.0.0/8     (Loopback)
+//
+// Exception: traffic within the isolated network's own subnet (172.30.0.0/24) is allowed
+// so containers can reach the gateway for DNS resolution and internet routing.
+func (e *Executor) applyNetworkFirewallRules() error {
+	blockedSubnets := []string{
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"169.254.0.0/16",
+		"127.0.0.0/8",
+	}
+
+	// First, allow traffic to the isolated network's own gateway.
+	// This is needed because 172.30.0.0/24 falls within the 172.16.0.0/12 block.
+	// Without this exception, containers couldn't reach the gateway for DNS and routing.
+	if err := e.addIptablesAcceptRule(isolatedNetworkGateway); err != nil {
+		return fmt.Errorf("failed to allow gateway access: %w", err)
+	}
+
+	for _, subnet := range blockedSubnets {
+		if err := e.addIptablesRule(subnet); err != nil {
+			return fmt.Errorf("failed to block subnet %s: %w", subnet, err)
+		}
+	}
+
+	e.logger.Info("Network firewall rules applied",
+		zap.Strings("blocked_subnets", blockedSubnets),
+	)
+
+	return nil
+}
+
+// addIptablesRule inserts an iptables DROP rule to block traffic from the isolated network
+// to the specified destination subnet. Uses -C (check) first to avoid duplicate rules.
+func (e *Executor) addIptablesRule(destSubnet string) error {
+	return e.upsertIptablesRule(destSubnet, "DROP")
+}
+
+// addIptablesAcceptRule inserts an iptables ACCEPT rule to allow traffic from the isolated
+// network to a specific destination (e.g., the gateway). Inserted before DROP rules.
+func (e *Executor) addIptablesAcceptRule(destIP string) error {
+	return e.upsertIptablesRule(destIP, "ACCEPT")
+}
+
+// upsertIptablesRule inserts an iptables rule if it doesn't already exist.
+func (e *Executor) upsertIptablesRule(dest string, action string) error {
+	chain := "DOCKER-USER"
+	ruleArgs := []string{
+		"-i", "br-" + e.networkID[:12],
+		"-d", dest,
+		"-j", action,
+	}
+
+	// Check if rule already exists
+	checkArgs := append([]string{"iptables", "-C", chain}, ruleArgs...)
+	exitCode, err := e.runHostCommand(checkArgs)
+	if err == nil && exitCode == 0 {
+		return nil // Rule already exists
+	}
+
+	// Insert rule at the top of the chain
+	insertArgs := append([]string{"iptables", "-I", chain, "1"}, ruleArgs...)
+	exitCode, err = e.runHostCommand(insertArgs)
+	if err != nil {
+		return fmt.Errorf("failed to run iptables: %w", err)
+	}
+	if exitCode != 0 {
+		return fmt.Errorf("iptables exited with code %d", exitCode)
+	}
+
+	return nil
+}
+
+// runHostCommand executes a command on the host using a privileged helper container.
+// This is needed because the agent process itself may not have root/iptables access,
+// but it can create a privileged container with host network namespace to run iptables.
+func (e *Executor) runHostCommand(cmd []string) (int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	resp, err := e.client.ContainerCreate(ctx, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   cmd,
+	}, &container.HostConfig{
+		NetworkMode: "host",
+		CapAdd:      []string{"NET_ADMIN"},
+		AutoRemove:  true,
+	}, nil, nil, "")
+	if err != nil {
+		return -1, fmt.Errorf("failed to create iptables helper: %w", err)
+	}
+
+	if err := e.client.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		return -1, fmt.Errorf("failed to start iptables helper: %w", err)
+	}
+
+	statusCh, errCh := e.client.ContainerWait(ctx, resp.ID, container.WaitConditionNotRunning)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			return -1, err
+		}
+	case status := <-statusCh:
+		return int(status.StatusCode), nil
+	case <-ctx.Done():
+		return -1, ctx.Err()
+	}
+
+	return -1, nil
 }
 
 // ContainerConfig holds resource limits, timeout settings, and dependencies for container execution.
@@ -62,7 +256,7 @@ type ContainerConfig struct {
 //   - TIMEOUT: Uses context.WithTimeout to enforce execution time limits
 //   - MEMORY: Limits container memory via HostConfig.Resources.Memory
 //   - CPU: Limits CPU via HostConfig.Resources.NanoCPUs
-//   - NETWORK: Isolates container from network (NetworkMode: "none") unless dependencies are needed
+//   - NETWORK: Uses vortix-isolated network (internet egress allowed, private subnets blocked)
 //
 // The logCallback is invoked for each log line as it's received.
 // If logCallback is nil, logs are collected but not streamed.
@@ -410,46 +604,24 @@ func (e *Executor) ensureImage(ctx context.Context, imageName string) error {
 //   - User: 1000:1000 - Runs as non-root user to limit damage from container escape
 //   - Working directory set to /app where the script is injected
 func (e *Executor) createContainer(ctx context.Context, imageName string, config ContainerConfig) (string, error) {
-	// ============================================================
-	// DYNAMIC PIP INSTALLATION: Build command based on requirements
-	// ============================================================
-	//
-	// If requirements are specified, we need to:
-	// 1. Enable network access (bridge mode) to download packages
-	// 2. Construct a chained shell command: pip install ... && python task.py
-	//
-	// If no requirements, we keep the secure "none" network mode.
-
+	// Build command based on requirements.
+	// All containers use the vortix-isolated network which allows internet egress
+	// but blocks all private/internal subnets via iptables rules.
 	var finalCmd []string
-	networkMode := container.NetworkMode("none") // Default: maximum security, no network
 
 	if len(config.Requirements) > 0 {
-		// Log the dependencies being installed for visibility
 		e.logger.Info("Installing dependencies before script execution",
 			zap.Strings("requirements", config.Requirements),
 		)
 
-		// Enable network access to allow pip to download packages from PyPI
-		// Using "bridge" mode which provides standard Docker networking
-		networkMode = container.NetworkMode("bridge")
-
-		// Build the pip install command with --no-cache-dir to minimize disk usage
-		// Format: pip install --no-cache-dir pkg1 pkg2 pkg3 && python task.py
 		pipInstallCmd := "pip install --user --no-cache-dir " + strings.Join(config.Requirements, " ")
-
-		// Chain commands: install dependencies first, then run the script
-		// Using && ensures the script only runs if pip install succeeds
 		combinedCmd := pipInstallCmd + " && python task.py"
-
-		// Wrap in shell to execute the chained command
-		// Using /bin/sh -c for maximum compatibility across images
 		finalCmd = []string{"/bin/sh", "-c", combinedCmd}
 
 		e.logger.Debug("Built combined command with pip install",
 			zap.String("combined_command", combinedCmd),
 		)
 	} else {
-		// No dependencies, just run the script directly
 		finalCmd = []string{"python", "task.py"}
 	}
 
@@ -495,10 +667,9 @@ func (e *Executor) createContainer(ctx context.Context, imageName string, config
 			MemorySwap: memoryBytes,
 			NanoCPUs:   nanoCPUs, // CPU limit in nanoseconds per second
 		},
-		// NetworkMode: Conditionally set based on requirements
-		// - "none": No requirements, maximum security (no network access)
-		// - "bridge": Has requirements, needs network for pip install
-		NetworkMode: networkMode,
+		// NetworkMode: All containers use the vortix-isolated network.
+		// Internet egress is allowed; private/internal subnets are blocked by iptables.
+		NetworkMode: container.NetworkMode(isolatedNetworkName),
 
 		// ============================================================
 		// SECURITY HARDENING: Principle of Least Privilege
@@ -535,7 +706,7 @@ func (e *Executor) createContainer(ctx context.Context, imageName string, config
 		zap.String("image", imageName),
 		zap.Int64("memory_bytes", memoryBytes),
 		zap.Int64("nano_cpus", nanoCPUs),
-		zap.String("network_mode", string(hostConfig.NetworkMode)),
+		zap.String("network", isolatedNetworkName),
 		zap.Strings("cap_drop", hostConfig.CapDrop),
 		zap.Strings("security_opt", hostConfig.SecurityOpt),
 		zap.Bool("privileged", hostConfig.Privileged),
@@ -656,10 +827,51 @@ func (w *lineCallbackWriter) Flush() {
 	w.buf.Reset()
 }
 
-// Close releases Docker client resources.
+// Close cleans up firewall rules and releases Docker client resources.
+// The network itself is kept for reuse on next agent startup.
 func (e *Executor) Close() error {
 	if e.client != nil {
+		if e.networkID != "" {
+			e.cleanupFirewallRules()
+		}
 		return e.client.Close()
 	}
 	return nil
+}
+
+// cleanupFirewallRules removes all iptables rules added by applyNetworkFirewallRules.
+func (e *Executor) cleanupFirewallRules() {
+	iface := "br-" + e.networkID[:12]
+
+	// Remove DROP rules
+	for _, subnet := range []string{
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"169.254.0.0/16",
+		"127.0.0.0/8",
+	} {
+		e.deleteIptablesRule(iface, subnet, "DROP")
+	}
+
+	// Remove gateway ACCEPT rule
+	e.deleteIptablesRule(iface, isolatedNetworkGateway, "ACCEPT")
+
+	e.logger.Info("Firewall rules cleaned up")
+}
+
+func (e *Executor) deleteIptablesRule(iface, dest, action string) {
+	args := []string{
+		"iptables", "-D", "DOCKER-USER",
+		"-i", iface,
+		"-d", dest,
+		"-j", action,
+	}
+	if _, err := e.runHostCommand(args); err != nil {
+		e.logger.Warn("Failed to remove iptables rule",
+			zap.String("dest", dest),
+			zap.String("action", action),
+			zap.Error(err),
+		)
+	}
 }
