@@ -58,6 +58,29 @@ func NewExecutor(logger *zap.Logger, gpuCount int) (*Executor, error) {
 		return nil, fmt.Errorf("failed to create Docker client: %w", err)
 	}
 
+	// Validate NVIDIA Container Toolkit if GPUs were discovered.
+	// If toolkit is not installed, fall back to CPU-only mode rather than failing
+	// at container creation time with an unclear error.
+	if gpuCount > 0 {
+		if hasToolkit := checkNVIDIAToolkit(cli, logger); !hasToolkit {
+			logger.Warn("NVIDIA Container Toolkit not detected - falling back to CPU-only mode",
+				zap.Int("gpus_discovered", gpuCount),
+			)
+			fmt.Println("\n" +
+				"  [!] NVIDIA Container Toolkit is not installed or not configured.\n" +
+				"      GPUs were detected but cannot be passed to containers.\n" +
+				"      Node will operate in CPU-only mode.\n" +
+				"\n" +
+				"      To enable GPU support, install the toolkit:\n" +
+				"        https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html\n" +
+				"\n" +
+				"      Then configure Docker:\n" +
+				"        sudo nvidia-ctk runtime configure --runtime=docker\n" +
+				"        sudo systemctl restart docker\n")
+			gpuCount = 0
+		}
+	}
+
 	e := &Executor{
 		client:   cli,
 		logger:   logger,
@@ -74,6 +97,32 @@ func NewExecutor(logger *zap.Logger, gpuCount int) (*Executor, error) {
 	)
 
 	return e, nil
+}
+
+// checkNVIDIAToolkit checks if the NVIDIA Container Toolkit is registered with Docker.
+// It queries the Docker daemon info and looks for the "nvidia" runtime in the registered runtimes.
+// This is a lightweight check (no container spin-up) that catches the common case of
+// GPUs being present but the toolkit not installed/configured.
+func checkNVIDIAToolkit(cli *client.Client, logger *zap.Logger) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	info, err := cli.Info(ctx)
+	if err != nil {
+		logger.Warn("Failed to query Docker info for NVIDIA toolkit check", zap.Error(err))
+		return false
+	}
+
+	for name := range info.Runtimes {
+		if name == "nvidia" {
+			logger.Info("NVIDIA Container Toolkit detected",
+				zap.String("runtime", "nvidia"),
+			)
+			return true
+		}
+	}
+
+	return false
 }
 
 // ensureIsolatedNetwork creates (or reuses) the vortix-isolated Docker network.
