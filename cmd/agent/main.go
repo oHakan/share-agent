@@ -121,7 +121,7 @@ func main() {
 	// Show system check result
 	gpuCount := 0
 	gpuModel := ""
-	if capacity.GPUs != nil && len(capacity.GPUs.GPUs) > 0 {
+	if capacity.GPUs != nil && !capacity.GPUs.CPUOnlyMode && len(capacity.GPUs.GPUs) > 0 {
 		gpuCount = len(capacity.GPUs.GPUs)
 		gpuModel = capacity.GPUs.GPUs[0].Name
 	}
@@ -163,7 +163,7 @@ func main() {
 	fmt.Println(string(outputJSON))
 
 	// --- Create Docker Executor for job execution ---
-	executor, err := docker.NewExecutor(log)
+	executor, err := docker.NewExecutor(log, gpuCount)
 	if err != nil {
 		log.Error("Failed to create Docker executor",
 			zap.Error(err),

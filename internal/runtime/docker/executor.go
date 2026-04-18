@@ -38,13 +38,18 @@ type Executor struct {
 	client    *client.Client
 	logger    *zap.Logger
 	networkID string // ID of the vortix-isolated network
+	gpuCount  int    // Number of GPUs available on this node (0 = CPU-only)
 }
 
 // NewExecutor creates a new Docker container executor.
 // It creates a client from environment variables (DOCKER_HOST, etc.)
 // and sets up an isolated Docker network that allows internet egress
 // but blocks all access to private/internal subnets and the host.
-func NewExecutor(logger *zap.Logger) (*Executor, error) {
+//
+// gpuCount indicates how many GPUs are available on this node.
+// If > 0, containers will be created with NVIDIA GPU passthrough via DeviceRequests.
+// If 0, containers run in CPU-only mode.
+func NewExecutor(logger *zap.Logger, gpuCount int) (*Executor, error) {
 	cli, err := client.NewClientWithOpts(
 		client.FromEnv,
 		client.WithAPIVersionNegotiation(),
@@ -54,14 +59,19 @@ func NewExecutor(logger *zap.Logger) (*Executor, error) {
 	}
 
 	e := &Executor{
-		client: cli,
-		logger: logger,
+		client:   cli,
+		logger:   logger,
+		gpuCount: gpuCount,
 	}
 
 	if err := e.ensureIsolatedNetwork(context.Background()); err != nil {
 		cli.Close()
 		return nil, fmt.Errorf("failed to setup isolated network: %w", err)
 	}
+
+	logger.Info("Docker executor initialized",
+		zap.Int("gpu_count", gpuCount),
+	)
 
 	return e, nil
 }
@@ -615,7 +625,9 @@ func (e *Executor) createContainer(ctx context.Context, imageName string, config
 		)
 
 		pipInstallCmd := "pip install --user --no-cache-dir " + strings.Join(config.Requirements, " ")
-		combinedCmd := pipInstallCmd + " && python task.py"
+		// exec replaces the shell process with python, so python becomes PID 1
+		// and receives SIGTERM directly for graceful shutdown support.
+		combinedCmd := pipInstallCmd + " && exec python task.py"
 		finalCmd = []string{"/bin/sh", "-c", combinedCmd}
 
 		e.logger.Debug("Built combined command with pip install",
@@ -625,15 +637,26 @@ func (e *Executor) createContainer(ctx context.Context, imageName string, config
 		finalCmd = []string{"python", "task.py"}
 	}
 
+	// Build environment variables
+	envVars := []string{
+		"HOME=/tmp",
+		"PATH=/tmp/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+	}
+
+	// Add NVIDIA env vars when GPUs are available so the container runtime
+	// knows which driver capabilities to expose and which devices to mount.
+	if e.gpuCount > 0 {
+		envVars = append(envVars,
+			"NVIDIA_VISIBLE_DEVICES=all",
+			"NVIDIA_DRIVER_CAPABILITIES=compute,utility",
+		)
+	}
+
 	containerConfig := &container.Config{
 		Image: imageName,
 		Cmd:   finalCmd,
-		Tty:   false, // Don't allocate a pseudo-TTY
-		Env: []string{
-			"HOME=/tmp",
-			// Python'un --user ile kurduğu paketleri bulabilmesi için PATH güncellemesi
-			"PATH=/tmp/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		},
+		Tty:   false,
+		Env:   envVars,
 		// WorkingDir: Set to /app where the script is injected.
 		// Scripts will execute in this directory.
 		WorkingDir: "/app",
@@ -646,27 +669,41 @@ func (e *Executor) createContainer(ctx context.Context, imageName string, config
 	}
 
 	// Calculate resource limits
-	//
-	// Memory: Convert MB to Bytes
-	// Docker expects memory limit in bytes, so we multiply MB by 1024*1024
 	memoryBytes := config.MemoryLimitMB * 1024 * 1024
-	//
-	// CPU: Convert CPU cores to NanoCPUs
-	// Docker uses NanoCPUs where 1 CPU core = 1,000,000,000 (1e9) nanoseconds
-	// For example:
-	//   - 0.5 cores = 500,000,000 NanoCPUs (half a CPU core)
-	//   - 1.0 cores = 1,000,000,000 NanoCPUs (one full CPU core)
-	//   - 2.0 cores = 2,000,000,000 NanoCPUs (two CPU cores)
-	// This provides precise CPU allocation in billionths of a CPU
 	nanoCPUs := int64(config.CPULimit * 1_000_000_000)
 
+	// Calculate SHM size: 25% of memory limit, minimum 256MB.
+	// PyTorch DataLoader with num_workers>0 and NCCL multi-GPU communication
+	// require significantly more than Docker's default 64MB.
+	const minShmBytes int64 = 256 * 1024 * 1024 // 256 MB
+	shmBytes := memoryBytes / 4
+	if shmBytes < minShmBytes {
+		shmBytes = minShmBytes
+	}
+
+	resources := container.Resources{
+		Memory:     memoryBytes,
+		MemorySwap: memoryBytes,
+		NanoCPUs:   nanoCPUs,
+	}
+
+	// Add GPU passthrough when GPUs are available on this node.
+	// DeviceRequests tells the NVIDIA Container Toolkit to mount GPU devices
+	// and driver libraries into the container.
+	if e.gpuCount > 0 {
+		resources.DeviceRequests = []container.DeviceRequest{
+			{
+				Driver:       "nvidia",
+				Count:        -1, // All available GPUs
+				Capabilities: [][]string{{"gpu"}},
+			},
+		}
+	}
+
 	hostConfig := &container.HostConfig{
-		AutoRemove: false, // We'll remove manually after getting logs
-		Resources: container.Resources{
-			Memory:     memoryBytes, // Memory limit in bytes
-			MemorySwap: memoryBytes,
-			NanoCPUs:   nanoCPUs, // CPU limit in nanoseconds per second
-		},
+		AutoRemove: false,
+		Resources:  resources,
+		ShmSize:    shmBytes,
 		// NetworkMode: All containers use the vortix-isolated network.
 		// Internet egress is allowed; private/internal subnets are blocked by iptables.
 		NetworkMode: container.NetworkMode(isolatedNetworkName),
@@ -705,13 +742,11 @@ func (e *Executor) createContainer(ctx context.Context, imageName string, config
 	e.logger.Debug("Creating container with resource limits and security hardening",
 		zap.String("image", imageName),
 		zap.Int64("memory_bytes", memoryBytes),
+		zap.Int64("shm_bytes", shmBytes),
 		zap.Int64("nano_cpus", nanoCPUs),
+		zap.Int("gpu_count", e.gpuCount),
 		zap.String("network", isolatedNetworkName),
-		zap.Strings("cap_drop", hostConfig.CapDrop),
-		zap.Strings("security_opt", hostConfig.SecurityOpt),
-		zap.Bool("privileged", hostConfig.Privileged),
 		zap.String("user", containerConfig.User),
-		zap.String("working_dir", containerConfig.WorkingDir),
 	)
 
 	resp, err := e.client.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, "")
