@@ -411,29 +411,29 @@ func createJobHandler(executor *docker.Executor, limitsStore *limits.Store, log 
 			return result
 		}
 
-		// Validate that we have script content to execute
-		if req.ScriptContent == "" {
+		// Validate that we have something to execute
+		if req.ScriptContent == "" && len(req.Files) == 0 {
 			result.Status = "failed"
-			result.OutputLog = "No script content provided"
-			log.Error("Job failed - no script content",
+			result.OutputLog = "No script content or files provided"
+			log.Error("Job failed - no script content or files",
 				zap.String("job_id", req.JobId),
 			)
 			return result
 		}
 
 		// Clamp resource requests to configured limits
-		// This ensures containers never exceed the limits set by the orchestrator
 		clampedCPU, clampedMemoryMB := limitsStore.Clamp(float64(req.CpuLimit), req.MemoryLimitMb)
 		_, _, volumeLimitGB := limitsStore.Get()
 
-		log.Info("Executing job with in-memory script injection",
+		log.Info("Executing job",
 			zap.String("job_id", req.JobId),
 			zap.String("image", req.Image),
 			zap.Int("script_length", len(req.ScriptContent)),
+			zap.Int("file_count", len(req.Files)),
+			zap.String("entrypoint", req.Entrypoint),
 			zap.Strings("requirements", req.Requirements),
 			zap.Float64("cpu_limit", clampedCPU),
 			zap.Int64("memory_limit_mb", clampedMemoryMB),
-			zap.Int64("volume_limit_gb", volumeLimitGB),
 		)
 
 		fmt.Println(formatter.Info(
@@ -441,25 +441,39 @@ func createJobHandler(executor *docker.Executor, limitsStore *limits.Store, log 
 			fmt.Sprintf("image=%s cpu=%.2f mem=%dMB vol=%dGB", req.Image, clampedCPU, clampedMemoryMB, volumeLimitGB),
 		))
 
-		// Build container config with clamped resource limits and script content
-		// Script is injected into container via tar archive (zero disk footprint)
-		containerConfig := docker.ContainerConfig{
-			MemoryLimitMB:  clampedMemoryMB,    // Clamped memory limit in MB
-			CPULimit:       clampedCPU,         // Clamped CPU limit in cores
-			VolumeLimitGB:  volumeLimitGB,      // Volume limit in GB (monitored during execution)
-			TimeoutSeconds: req.TimeoutSeconds, // Execution timeout in seconds
-			Requirements:   req.Requirements,   // Python dependencies to install
-			Script:         req.ScriptContent,  // Script content injected into container
+		// Build additional files map from proto
+		var filesMap map[string][]byte
+		if len(req.Files) > 0 {
+			filesMap = make(map[string][]byte, len(req.Files))
+			for _, f := range req.Files {
+				filesMap[f.Path] = f.Content
+			}
 		}
 
-		// Run the container with log streaming callback and security sandbox
+		containerConfig := docker.ContainerConfig{
+			MemoryLimitMB:    clampedMemoryMB,
+			CPULimit:         clampedCPU,
+			VolumeLimitGB:    volumeLimitGB,
+			TimeoutSeconds:   req.TimeoutSeconds,
+			Requirements:     req.Requirements,
+			Script:           req.ScriptContent,
+			Files:            filesMap,
+			Entrypoint:       req.Entrypoint,
+			Command:          req.Command,
+			MaxArtifactBytes: req.MaxArtifactBytes,
+		}
+
 		startTime := time.Now()
-		output, err := executor.RunContainer(ctx, req.Image, containerConfig, logSender)
+		runResult, err := executor.RunContainer(ctx, req.Image, containerConfig, logSender)
 		duration := time.Since(startTime)
 
 		if err != nil {
 			result.Status = "failed"
-			result.OutputLog = fmt.Sprintf("Execution error: %v", err)
+			if runResult != nil {
+				result.OutputLog = runResult.Logs
+			} else {
+				result.OutputLog = fmt.Sprintf("Execution error: %v", err)
+			}
 			log.Error("Job execution failed",
 				zap.String("job_id", req.JobId),
 				zap.Error(err),
@@ -472,25 +486,30 @@ func createJobHandler(executor *docker.Executor, limitsStore *limits.Store, log 
 		}
 
 		result.Status = "completed"
-		result.OutputLog = output
-
-		// Add execution stats
-		// Note: Peak CPU implementation would require continuous monitoring during execution
-		// For now we just send the duration and 0 for peak CPU or we could sample once
+		result.OutputLog = runResult.Logs
 		result.Stats = &pb.JobStats{
 			DurationMs: duration.Milliseconds(),
-			// PeakCpuPercent: 0, // Placeholder until container monitoring is implemented
+		}
+
+		// Map extracted artifacts to proto
+		for _, a := range runResult.Artifacts {
+			result.Artifacts = append(result.Artifacts, &pb.ArtifactInfo{
+				Filename:  a.Filename,
+				SizeBytes: a.SizeBytes,
+				Content:   a.Content,
+			})
 		}
 
 		log.Info("Job completed successfully",
 			zap.String("job_id", req.JobId),
-			zap.Int("output_length", len(output)),
+			zap.Int("output_length", len(runResult.Logs)),
+			zap.Int("artifact_count", len(runResult.Artifacts)),
 			zap.Int64("duration_ms", duration.Milliseconds()),
 		)
 
 		fmt.Println(formatter.Success(
 			fmt.Sprintf("Job %s completed", req.JobId),
-			fmt.Sprintf("duration=%dms output=%d chars", duration.Milliseconds(), len(output)),
+			fmt.Sprintf("duration=%dms output=%d chars artifacts=%d", duration.Milliseconds(), len(runResult.Logs), len(runResult.Artifacts)),
 		))
 
 		return result

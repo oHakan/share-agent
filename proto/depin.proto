@@ -43,16 +43,25 @@ message RegistrationResponse {
   ResourceLimits resource_limits = 3;  // Initial resource limits for the node
 }
 
+// JobFile represents a file to inject into the container workspace
+message JobFile {
+  string path = 1;       // Relative path inside /app (e.g., "model/network.py", "config.yaml")
+  bytes content = 2;     // File content
+}
+
 // JobRequest is sent from orchestrator to agent to execute a container
 message JobRequest {
   string job_id = 1;           // Unique identifier for this job
   string image = 2;            // Docker image to run (e.g., "alpine")
   repeated string command = 3; // Command to execute in the container
-  string script_content = 4;   // Raw Python script content to execute
+  string script_content = 4;   // Raw Python script content to execute (injected as task.py for backward compat)
   int64 memory_limit_mb = 5;   // Memory limit in MB (e.g., 512 for 512MB)
   float cpu_limit = 6;         // CPU limit (e.g., 0.5 for half core, 1.0 for one core)
   int32 timeout_seconds = 7;   // Execution timeout in seconds (e.g., 60)
   repeated string requirements = 8; // Python dependencies to install (e.g., ["numpy", "pandas"])
+  repeated JobFile files = 9;       // Additional files to inject into /app
+  string entrypoint = 10;           // Script to execute (default: "task.py")
+  int64 max_artifact_bytes = 11;    // Max artifact output size in bytes (0 = no artifact collection)
 }
 
 // Heartbeat contains real-time telemetry data for live graphs
@@ -76,12 +85,20 @@ message JobStats {
   int64 duration_ms = 2;         // Total execution duration in milliseconds
 }
 
+// ArtifactInfo describes a file produced by the container in /app/output/
+message ArtifactInfo {
+  string filename = 1;      // Relative path (e.g., "model.pt", "results/metrics.csv")
+  int64 size_bytes = 2;     // File size
+  bytes content = 3;        // File content (for small artifacts, max ~50MB total)
+}
+
 // JobResult is sent from agent back to orchestrator with execution results
 message JobResult {
   string job_id = 1;      // Job ID this result belongs to
   string status = 2;      // Status: "running", "completed", "failed"
   string output_log = 3;  // Container output/logs
   JobStats stats = 4;     // Execution statistics (optional, only on completion)
+  repeated ArtifactInfo artifacts = 5;  // Output files from /app/output/
 }
 
 // JobLog is sent from agent to orchestrator for real-time log streaming

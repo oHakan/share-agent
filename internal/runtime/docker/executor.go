@@ -247,32 +247,40 @@ func (e *Executor) runHostCommand(cmd []string) (int, error) {
 
 // ContainerConfig holds resource limits, timeout settings, and dependencies for container execution.
 type ContainerConfig struct {
-	MemoryLimitMB  int64    // Memory limit in megabytes (e.g., 512 for 512MB)
-	CPULimit       float64  // CPU limit in cores (e.g., 0.5 for half core, 1.0 for one core)
-	VolumeLimitGB  int64    // Volume/disk limit in GB (0 = no limit)
-	TimeoutSeconds int32    // Execution timeout in seconds (e.g., 60)
-	Requirements   []string // Python package dependencies to install before execution (e.g., ["numpy", "pandas==1.5.0"])
-	Script         string   // Python script content to execute (injected into container as task.py)
+	MemoryLimitMB    int64             // Memory limit in megabytes (e.g., 512 for 512MB)
+	CPULimit         float64           // CPU limit in cores (e.g., 0.5 for half core, 1.0 for one core)
+	VolumeLimitGB    int64             // Volume/disk limit in GB (0 = no limit)
+	TimeoutSeconds   int32             // Execution timeout in seconds (e.g., 60)
+	Requirements     []string          // Package dependencies to install before execution (e.g., ["numpy", "pandas==1.5.0"])
+	Script           string            // Main script content (injected as Entrypoint filename)
+	Files            map[string][]byte // Additional files to inject into /app (path -> content)
+	Entrypoint       string            // Script to execute (default: "task.py")
+	Command          []string          // Custom command override (e.g., ["node", "index.js"]). If set, Script/Entrypoint/Requirements are ignored.
+	MaxArtifactBytes int64             // Max total artifact output size in bytes (0 = no artifact collection)
+}
+
+// Artifact represents a file extracted from the container's /app/output/ directory.
+type Artifact struct {
+	Filename  string // Relative path (e.g., "model.pt", "results/metrics.csv")
+	SizeBytes int64
+	Content   []byte
+}
+
+// RunResult holds the output of a container execution.
+type RunResult struct {
+	Logs      string
+	Artifacts []Artifact
 }
 
 // RunContainer executes a container with the specified image and script.
-// It uses in-memory script injection (zero disk footprint on host) by:
-//  1. Creating the container first (without starting it)
-//  2. Preparing the script as a tar archive in RAM
-//  3. Injecting the tar archive into the container using CopyToContainer
-//  4. Starting the container to execute the script
+// After execution, it extracts artifact files from /app/output/ if MaxArtifactBytes > 0.
 //
 // Security controls enforced:
 //   - TIMEOUT: Uses context.WithTimeout to enforce execution time limits
 //   - MEMORY: Limits container memory via HostConfig.Resources.Memory
 //   - CPU: Limits CPU via HostConfig.Resources.NanoCPUs
 //   - NETWORK: Uses vortix-isolated network (internet egress allowed, private subnets blocked)
-//
-// The logCallback is invoked for each log line as it's received.
-// If logCallback is nil, logs are collected but not streamed.
-//
-// The function ensures proper cleanup by removing the container after execution.
-func (e *Executor) RunContainer(ctx context.Context, imageName string, config ContainerConfig, logCallback func(string)) (string, error) {
+func (e *Executor) RunContainer(ctx context.Context, imageName string, config ContainerConfig, logCallback func(string)) (*RunResult, error) {
 	e.logger.Debug("Starting container execution",
 		zap.String("image", imageName),
 		zap.Int64("memory_limit_mb", config.MemoryLimitMB),
@@ -297,21 +305,20 @@ func (e *Executor) RunContainer(ctx context.Context, imageName string, config Co
 
 	// Step 2: Check if image exists locally, pull if not
 	if err := e.ensureImage(timeoutCtx, imageName); err != nil {
-		return "", fmt.Errorf("failed to ensure image: %w", err)
+		return nil, fmt.Errorf("failed to ensure image: %w", err)
 	}
 
 	// Step 3: Create container (do not start yet)
-	// We need to inject the script before starting
 	containerID, err := e.createContainer(timeoutCtx, imageName, config)
 	if err != nil {
-		return "", fmt.Errorf("failed to create container: %w", err)
+		return nil, fmt.Errorf("failed to create container: %w", err)
 	}
 
 	// Ensure container is removed after we're done (Force=true for cleanup even on timeout)
 	defer func() {
-		removeCtx := context.Background() // Use fresh context for cleanup to ensure removal
+		removeCtx := context.Background()
 		if removeErr := e.client.ContainerRemove(removeCtx, containerID, container.RemoveOptions{
-			Force: true, // Force removal even if container is still running (e.g., on timeout)
+			Force: true,
 		}); removeErr != nil {
 			e.logger.Warn("Failed to remove container",
 				zap.String("container_id", containerID),
@@ -324,29 +331,38 @@ func (e *Executor) RunContainer(ctx context.Context, imageName string, config Co
 		}
 	}()
 
-	// Step 4: Inject script into container using in-memory tar archive
-	// This avoids writing any files to the host disk (zero disk footprint)
-	if err := e.injectScript(timeoutCtx, containerID, config.Script); err != nil {
-		return "", fmt.Errorf("failed to inject script: %w", err)
+	// Step 4: Build file map and inject into container
+	files := make(map[string][]byte)
+
+	entrypoint := config.Entrypoint
+	if entrypoint == "" {
+		entrypoint = "task.py"
+	}
+	if config.Script != "" {
+		files[entrypoint] = []byte(config.Script)
+	}
+	for path, content := range config.Files {
+		files[path] = content
 	}
 
-	e.logger.Debug("Script injected into container",
-		zap.String("container_id", containerID),
-	)
+	// Create output directory so users can write artifacts even if they don't mkdir
+	files["output/.keep"] = []byte{}
 
-	// Step 5: Start the container (script is now inside)
+	if err := e.injectFiles(timeoutCtx, containerID, files); err != nil {
+		return nil, fmt.Errorf("failed to inject files: %w", err)
+	}
+
+	// Step 5: Start the container
 	if err := e.client.ContainerStart(timeoutCtx, containerID, container.StartOptions{}); err != nil {
-		return "", fmt.Errorf("failed to start container: %w", err)
+		return nil, fmt.Errorf("failed to start container: %w", err)
 	}
 
-	e.logger.Debug("Container started",
-		zap.String("container_id", containerID),
-	)
+	e.logger.Debug("Container started", zap.String("container_id", containerID))
 
-	// Step 5.5: Start volume monitoring goroutine if limit is set
+	// Step 5.5: Volume monitoring goroutine
 	var volumeExceeded bool
 	var volumeExceededBytes int64
-	volumeLimitBytes := config.VolumeLimitGB * 1024 * 1024 * 1024 // Convert GB to bytes
+	volumeLimitBytes := config.VolumeLimitGB * 1024 * 1024 * 1024
 
 	volumeCtx, volumeCancel := context.WithCancel(timeoutCtx)
 	defer volumeCancel()
@@ -355,19 +371,15 @@ func (e *Executor) RunContainer(ctx context.Context, imageName string, config Co
 		go func() {
 			ticker := time.NewTicker(2 * time.Second)
 			defer ticker.Stop()
-
 			for {
 				select {
 				case <-volumeCtx.Done():
 					return
 				case <-ticker.C:
-					// Check container disk usage
 					usedBytes, err := e.getContainerDiskUsage(volumeCtx, containerID)
 					if err != nil {
-						// Container might have stopped, ignore
 						continue
 					}
-
 					if usedBytes > volumeLimitBytes {
 						volumeExceeded = true
 						volumeExceededBytes = usedBytes
@@ -376,7 +388,6 @@ func (e *Executor) RunContainer(ctx context.Context, imageName string, config Co
 							zap.Int64("used_bytes", usedBytes),
 							zap.Int64("limit_bytes", volumeLimitBytes),
 						)
-						// Kill the container
 						_ = e.client.ContainerKill(context.Background(), containerID, "SIGKILL")
 						return
 					}
@@ -385,22 +396,24 @@ func (e *Executor) RunContainer(ctx context.Context, imageName string, config Co
 		}()
 	}
 
-	// Step 6: Stream logs in real-time while container is running
+	// Helper for error returns with logs
+	errResult := func(logs, msg string, err error) (*RunResult, error) {
+		if logCallback != nil && msg != "" {
+			logCallback(msg)
+		}
+		if msg != "" && logs != "" {
+			logs = logs + "\n" + msg
+		}
+		return &RunResult{Logs: logs}, err
+	}
+
+	// Step 6: Stream logs in real-time
 	logs, err := e.streamLogs(timeoutCtx, containerID, logCallback)
 	if err != nil {
-		// Check if this was a timeout
 		if timeoutCtx.Err() == context.DeadlineExceeded {
-			timeoutMsg := "Process killed due to timeout."
-			e.logger.Warn(timeoutMsg,
-				zap.String("container_id", containerID),
-				zap.Int32("timeout_seconds", config.TimeoutSeconds),
-			)
-			if logCallback != nil {
-				logCallback(timeoutMsg)
-			}
-			return logs + "\n" + timeoutMsg, fmt.Errorf("execution timeout: %w", timeoutCtx.Err())
+			return errResult(logs, "Process killed due to timeout.", fmt.Errorf("execution timeout: %w", timeoutCtx.Err()))
 		}
-		return "", fmt.Errorf("failed to stream logs: %w", err)
+		return nil, fmt.Errorf("failed to stream logs: %w", err)
 	}
 
 	// Step 7: Wait for container to finish
@@ -409,88 +422,126 @@ func (e *Executor) RunContainer(ctx context.Context, imageName string, config Co
 	select {
 	case err := <-errCh:
 		if err != nil {
-			// Check for volume limit exceeded first
 			if volumeExceeded {
 				usedGB := float64(volumeExceededBytes) / (1024 * 1024 * 1024)
-				volumeMsg := fmt.Sprintf("Volume limit exceeded (%.2f GB / %d GB)", usedGB, config.VolumeLimitGB)
-				e.logger.Error(volumeMsg,
-					zap.String("container_id", containerID),
-				)
-				if logCallback != nil {
-					logCallback(volumeMsg)
-				}
-				return logs + "\n" + volumeMsg, fmt.Errorf("volume limit exceeded")
+				return errResult(logs, fmt.Sprintf("Volume limit exceeded (%.2f GB / %d GB)", usedGB, config.VolumeLimitGB), fmt.Errorf("volume limit exceeded"))
 			}
-			// Check for timeout
 			if timeoutCtx.Err() == context.DeadlineExceeded {
-				timeoutMsg := "Process killed due to timeout."
-				e.logger.Warn(timeoutMsg,
-					zap.String("container_id", containerID),
-					zap.Int32("timeout_seconds", config.TimeoutSeconds),
-				)
-				if logCallback != nil {
-					logCallback(timeoutMsg)
-				}
-				return "", fmt.Errorf("execution timeout: %w", timeoutCtx.Err())
+				return errResult("", "Process killed due to timeout.", fmt.Errorf("execution timeout: %w", timeoutCtx.Err()))
 			}
-			return "", fmt.Errorf("error waiting for container: %w", err)
+			return nil, fmt.Errorf("error waiting for container: %w", err)
 		}
 	case status := <-statusCh:
-		// Check for volume limit exceeded
 		if volumeExceeded {
 			usedGB := float64(volumeExceededBytes) / (1024 * 1024 * 1024)
-			volumeMsg := fmt.Sprintf("Volume limit exceeded (%.2f GB / %d GB)", usedGB, config.VolumeLimitGB)
-			e.logger.Error(volumeMsg,
-				zap.String("container_id", containerID),
-			)
-			if logCallback != nil {
-				logCallback(volumeMsg)
-			}
-			return logs + "\n" + volumeMsg, fmt.Errorf("volume limit exceeded")
+			return errResult(logs, fmt.Sprintf("Volume limit exceeded (%.2f GB / %d GB)", usedGB, config.VolumeLimitGB), fmt.Errorf("volume limit exceeded"))
 		}
-		if status.StatusCode != 0 {
-			if status.StatusCode == 137 {
-				timeoutMsg := "Memory Limit Exceeded."
-				e.logger.Error(timeoutMsg,
-					zap.String("container_id", containerID),
-					zap.Int32("timeout_seconds", config.TimeoutSeconds),
-				)
-				if logCallback != nil {
-					logCallback(timeoutMsg)
-				}
-				return "", fmt.Errorf("memory limit exceeded")
-			}
+		if status.StatusCode == 137 {
+			return errResult("", "Memory Limit Exceeded.", fmt.Errorf("memory limit exceeded"))
 		}
 		e.logger.Debug("Container finished",
 			zap.String("container_id", containerID),
 			zap.Int64("exit_code", status.StatusCode),
 		)
 	case <-timeoutCtx.Done():
-		// Check for volume limit exceeded first
 		if volumeExceeded {
 			usedGB := float64(volumeExceededBytes) / (1024 * 1024 * 1024)
-			volumeMsg := fmt.Sprintf("Volume limit exceeded (%.2f GB / %d GB)", usedGB, config.VolumeLimitGB)
-			e.logger.Error(volumeMsg,
-				zap.String("container_id", containerID),
-			)
-			if logCallback != nil {
-				logCallback(volumeMsg)
-			}
-			return logs + "\n" + volumeMsg, fmt.Errorf("volume limit exceeded")
+			return errResult(logs, fmt.Sprintf("Volume limit exceeded (%.2f GB / %d GB)", usedGB, config.VolumeLimitGB), fmt.Errorf("volume limit exceeded"))
 		}
-		// Timeout occurred - append clear message to logs
-		timeoutMsg := "Process killed due to timeout."
-		e.logger.Warn(timeoutMsg,
-			zap.String("container_id", containerID),
-			zap.Int32("timeout_seconds", config.TimeoutSeconds),
-		)
-		if logCallback != nil {
-			logCallback(timeoutMsg)
-		}
-		return logs + "\n" + timeoutMsg, fmt.Errorf("execution timeout: %w", timeoutCtx.Err())
+		return errResult(logs, "Process killed due to timeout.", fmt.Errorf("execution timeout: %w", timeoutCtx.Err()))
 	}
 
-	return logs, nil
+	// Step 8: Extract artifacts from /app/output/ if requested
+	result := &RunResult{Logs: logs}
+
+	if config.MaxArtifactBytes > 0 {
+		artifacts, err := e.extractArtifacts(containerID, config.MaxArtifactBytes)
+		if err != nil {
+			e.logger.Warn("Failed to extract artifacts", zap.Error(err))
+			// Non-fatal: job succeeded, artifact extraction failed
+		} else {
+			result.Artifacts = artifacts
+		}
+	}
+
+	return result, nil
+}
+
+// extractArtifacts copies /app/output/ from the container and parses the tar archive.
+// It enforces a total size limit and skips symlinks and paths with ".." to prevent escape.
+func (e *Executor) extractArtifacts(containerID string, maxBytes int64) ([]Artifact, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	reader, _, err := e.client.CopyFromContainer(ctx, containerID, "/app/output/")
+	if err != nil {
+		return nil, fmt.Errorf("failed to copy from container: %w", err)
+	}
+	defer reader.Close()
+
+	tr := tar.NewReader(reader)
+	var artifacts []Artifact
+	var totalBytes int64
+	const maxFiles = 1000
+
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return artifacts, fmt.Errorf("failed to read tar entry: %w", err)
+		}
+
+		// Skip directories, symlinks, and special files
+		if hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+
+		// Security: reject paths that try to escape
+		if strings.Contains(hdr.Name, "..") {
+			e.logger.Warn("Skipping artifact with suspicious path", zap.String("path", hdr.Name))
+			continue
+		}
+
+		// Strip the leading "output/" prefix from tar path
+		name := strings.TrimPrefix(hdr.Name, "output/")
+		if name == "" || name == ".keep" {
+			continue
+		}
+
+		// Check limits
+		if totalBytes+hdr.Size > maxBytes {
+			e.logger.Warn("Artifact size limit reached, skipping remaining files",
+				zap.Int64("total_bytes", totalBytes),
+				zap.Int64("max_bytes", maxBytes),
+			)
+			break
+		}
+		if len(artifacts) >= maxFiles {
+			e.logger.Warn("Artifact file count limit reached", zap.Int("max_files", maxFiles))
+			break
+		}
+
+		content, err := io.ReadAll(io.LimitReader(tr, hdr.Size))
+		if err != nil {
+			return artifacts, fmt.Errorf("failed to read artifact %s: %w", name, err)
+		}
+
+		totalBytes += int64(len(content))
+		artifacts = append(artifacts, Artifact{
+			Filename:  name,
+			SizeBytes: int64(len(content)),
+			Content:   content,
+		})
+	}
+
+	e.logger.Info("Artifacts extracted",
+		zap.Int("count", len(artifacts)),
+		zap.Int64("total_bytes", totalBytes),
+	)
+
+	return artifacts, nil
 }
 
 // getContainerDiskUsage returns the disk usage of a container's writable layer in bytes.
@@ -509,42 +560,45 @@ func (e *Executor) getContainerDiskUsage(ctx context.Context, containerID string
 	return 0, nil
 }
 
-// injectScript creates a tar archive containing the script in RAM and copies it into the container.
-// This achieves zero disk footprint on the host by never writing to the host filesystem.
+// injectFiles creates a tar archive containing all workspace files in RAM and copies it
+// into the container at /app. This achieves zero disk footprint on the host.
 //
-// The script is placed at /app/task.py inside the container.
-func (e *Executor) injectScript(ctx context.Context, containerID string, script string) error {
-	// Step 1: Create a buffer to hold the tar archive in RAM
+// The files map keys are relative paths (e.g., "task.py", "model/network.py").
+// Directories are created automatically by the tar extraction.
+func (e *Executor) injectFiles(ctx context.Context, containerID string, files map[string][]byte) error {
+	if len(files) == 0 {
+		return nil
+	}
+
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 
-	// Step 2: Write the tar header for task.py
-	scriptBytes := []byte(script)
-	hdr := &tar.Header{
-		Name: "task.py",
-		Mode: 0644,
-		Size: int64(len(scriptBytes)),
-	}
-	if err := tw.WriteHeader(hdr); err != nil {
-		return fmt.Errorf("failed to write tar header: %w", err)
-	}
-
-	// Step 3: Write the script content
-	if _, err := tw.Write(scriptBytes); err != nil {
-		return fmt.Errorf("failed to write script to tar: %w", err)
+	for path, content := range files {
+		hdr := &tar.Header{
+			Name: path,
+			Mode: 0644,
+			Size: int64(len(content)),
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return fmt.Errorf("failed to write tar header for %s: %w", path, err)
+		}
+		if _, err := tw.Write(content); err != nil {
+			return fmt.Errorf("failed to write %s to tar: %w", path, err)
+		}
 	}
 
-	// Step 4: Close the tar writer to finalize the archive
 	if err := tw.Close(); err != nil {
 		return fmt.Errorf("failed to close tar writer: %w", err)
 	}
 
-	// Step 5: Copy the tar archive into the container at /app
-	// This places task.py at /app/task.py inside the container
-	err := e.client.CopyToContainer(ctx, containerID, "/app", &buf, container.CopyToContainerOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to copy script to container: %w", err)
+	if err := e.client.CopyToContainer(ctx, containerID, "/app", &buf, container.CopyToContainerOptions{}); err != nil {
+		return fmt.Errorf("failed to copy files to container: %w", err)
 	}
+
+	e.logger.Debug("Injected files into container",
+		zap.Int("file_count", len(files)),
+		zap.Int("tar_bytes", buf.Len()),
+	)
 
 	return nil
 }
@@ -614,33 +668,42 @@ func (e *Executor) ensureImage(ctx context.Context, imageName string) error {
 //   - User: 1000:1000 - Runs as non-root user to limit damage from container escape
 //   - Working directory set to /app where the script is injected
 func (e *Executor) createContainer(ctx context.Context, imageName string, config ContainerConfig) (string, error) {
-	// Build command based on requirements.
-	// All containers use the vortix-isolated network which allows internet egress
-	// but blocks all private/internal subnets via iptables rules.
+	// Build the container command.
+	// Three modes:
+	//   1. Custom command: User provides full command (e.g., ["node", "index.js"]) - language agnostic
+	//   2. Python with requirements: pip install + exec python entrypoint
+	//   3. Python default: python entrypoint
 	var finalCmd []string
 
-	if len(config.Requirements) > 0 {
-		e.logger.Info("Installing dependencies before script execution",
-			zap.Strings("requirements", config.Requirements),
-		)
-
-		pipInstallCmd := "pip install --user --no-cache-dir " + strings.Join(config.Requirements, " ")
-		// exec replaces the shell process with python, so python becomes PID 1
-		// and receives SIGTERM directly for graceful shutdown support.
-		combinedCmd := pipInstallCmd + " && exec python task.py"
-		finalCmd = []string{"/bin/sh", "-c", combinedCmd}
-
-		e.logger.Debug("Built combined command with pip install",
-			zap.String("combined_command", combinedCmd),
-		)
+	if len(config.Command) > 0 {
+		// Mode 1: Custom command - user has full control, no Python assumptions
+		finalCmd = config.Command
+		e.logger.Debug("Using custom command", zap.Strings("command", finalCmd))
 	} else {
-		finalCmd = []string{"python", "task.py"}
+		// Mode 2 & 3: Python convention (backward compatible)
+		entrypoint := config.Entrypoint
+		if entrypoint == "" {
+			entrypoint = "task.py"
+		}
+
+		if len(config.Requirements) > 0 {
+			e.logger.Info("Installing dependencies before script execution",
+				zap.Strings("requirements", config.Requirements),
+			)
+			pipInstallCmd := "pip install --user --no-cache-dir " + strings.Join(config.Requirements, " ")
+			// exec replaces the shell with python so SIGTERM reaches the process directly.
+			combinedCmd := pipInstallCmd + " && exec python " + entrypoint
+			finalCmd = []string{"/bin/sh", "-c", combinedCmd}
+		} else {
+			finalCmd = []string{"python", entrypoint}
+		}
 	}
 
 	// Build environment variables
 	envVars := []string{
 		"HOME=/tmp",
 		"PATH=/tmp/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"VORTIX_OUTPUT_DIR=/app/output",  // Convention: write output files here for artifact collection
 	}
 
 	// Add NVIDIA env vars when GPUs are available so the container runtime

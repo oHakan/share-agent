@@ -140,6 +140,7 @@ func (c *Client) Connect(ctx context.Context) error {
 		dialOpts := []grpc.DialOption{
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 			grpc.WithBlock(),
+			grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(50 * 1024 * 1024)), // 50MB for artifact uploads
 		}
 
 		// Add API key interceptors if configured

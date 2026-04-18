@@ -338,24 +338,80 @@ func (x *RegistrationResponse) GetResourceLimits() *ResourceLimits {
 	return nil
 }
 
+// JobFile represents a file to inject into the container workspace
+type JobFile struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`       // Relative path inside /app (e.g., "model/network.py", "config.yaml")
+	Content       []byte                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"` // File content
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *JobFile) Reset() {
+	*x = JobFile{}
+	mi := &file_proto_depin_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JobFile) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JobFile) ProtoMessage() {}
+
+func (x *JobFile) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_depin_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JobFile.ProtoReflect.Descriptor instead.
+func (*JobFile) Descriptor() ([]byte, []int) {
+	return file_proto_depin_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *JobFile) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *JobFile) GetContent() []byte {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
 // JobRequest is sent from orchestrator to agent to execute a container
 type JobRequest struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	JobId          string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`                             // Unique identifier for this job
-	Image          string                 `protobuf:"bytes,2,opt,name=image,proto3" json:"image,omitempty"`                                          // Docker image to run (e.g., "alpine")
-	Command        []string               `protobuf:"bytes,3,rep,name=command,proto3" json:"command,omitempty"`                                      // Command to execute in the container
-	ScriptContent  string                 `protobuf:"bytes,4,opt,name=script_content,json=scriptContent,proto3" json:"script_content,omitempty"`     // Raw Python script content to execute
-	MemoryLimitMb  int64                  `protobuf:"varint,5,opt,name=memory_limit_mb,json=memoryLimitMb,proto3" json:"memory_limit_mb,omitempty"`  // Memory limit in MB (e.g., 512 for 512MB)
-	CpuLimit       float32                `protobuf:"fixed32,6,opt,name=cpu_limit,json=cpuLimit,proto3" json:"cpu_limit,omitempty"`                  // CPU limit (e.g., 0.5 for half core, 1.0 for one core)
-	TimeoutSeconds int32                  `protobuf:"varint,7,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"` // Execution timeout in seconds (e.g., 60)
-	Requirements   []string               `protobuf:"bytes,8,rep,name=requirements,proto3" json:"requirements,omitempty"`                            // Python dependencies to install (e.g., ["numpy", "pandas"])
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	JobId            string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`                                      // Unique identifier for this job
+	Image            string                 `protobuf:"bytes,2,opt,name=image,proto3" json:"image,omitempty"`                                                   // Docker image to run (e.g., "alpine")
+	Command          []string               `protobuf:"bytes,3,rep,name=command,proto3" json:"command,omitempty"`                                               // Command to execute in the container
+	ScriptContent    string                 `protobuf:"bytes,4,opt,name=script_content,json=scriptContent,proto3" json:"script_content,omitempty"`              // Raw Python script content to execute (injected as task.py for backward compat)
+	MemoryLimitMb    int64                  `protobuf:"varint,5,opt,name=memory_limit_mb,json=memoryLimitMb,proto3" json:"memory_limit_mb,omitempty"`           // Memory limit in MB (e.g., 512 for 512MB)
+	CpuLimit         float32                `protobuf:"fixed32,6,opt,name=cpu_limit,json=cpuLimit,proto3" json:"cpu_limit,omitempty"`                           // CPU limit (e.g., 0.5 for half core, 1.0 for one core)
+	TimeoutSeconds   int32                  `protobuf:"varint,7,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`          // Execution timeout in seconds (e.g., 60)
+	Requirements     []string               `protobuf:"bytes,8,rep,name=requirements,proto3" json:"requirements,omitempty"`                                     // Python dependencies to install (e.g., ["numpy", "pandas"])
+	Files            []*JobFile             `protobuf:"bytes,9,rep,name=files,proto3" json:"files,omitempty"`                                                   // Additional files to inject into /app
+	Entrypoint       string                 `protobuf:"bytes,10,opt,name=entrypoint,proto3" json:"entrypoint,omitempty"`                                        // Script to execute (default: "task.py")
+	MaxArtifactBytes int64                  `protobuf:"varint,11,opt,name=max_artifact_bytes,json=maxArtifactBytes,proto3" json:"max_artifact_bytes,omitempty"` // Max artifact output size in bytes (0 = no artifact collection)
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *JobRequest) Reset() {
 	*x = JobRequest{}
-	mi := &file_proto_depin_proto_msgTypes[4]
+	mi := &file_proto_depin_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -367,7 +423,7 @@ func (x *JobRequest) String() string {
 func (*JobRequest) ProtoMessage() {}
 
 func (x *JobRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[4]
+	mi := &file_proto_depin_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -380,7 +436,7 @@ func (x *JobRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobRequest.ProtoReflect.Descriptor instead.
 func (*JobRequest) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{4}
+	return file_proto_depin_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *JobRequest) GetJobId() string {
@@ -439,6 +495,27 @@ func (x *JobRequest) GetRequirements() []string {
 	return nil
 }
 
+func (x *JobRequest) GetFiles() []*JobFile {
+	if x != nil {
+		return x.Files
+	}
+	return nil
+}
+
+func (x *JobRequest) GetEntrypoint() string {
+	if x != nil {
+		return x.Entrypoint
+	}
+	return ""
+}
+
+func (x *JobRequest) GetMaxArtifactBytes() int64 {
+	if x != nil {
+		return x.MaxArtifactBytes
+	}
+	return 0
+}
+
 // Heartbeat contains real-time telemetry data for live graphs
 type Heartbeat struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
@@ -459,7 +536,7 @@ type Heartbeat struct {
 
 func (x *Heartbeat) Reset() {
 	*x = Heartbeat{}
-	mi := &file_proto_depin_proto_msgTypes[5]
+	mi := &file_proto_depin_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -471,7 +548,7 @@ func (x *Heartbeat) String() string {
 func (*Heartbeat) ProtoMessage() {}
 
 func (x *Heartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[5]
+	mi := &file_proto_depin_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -484,7 +561,7 @@ func (x *Heartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Heartbeat.ProtoReflect.Descriptor instead.
 func (*Heartbeat) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{5}
+	return file_proto_depin_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Heartbeat) GetNodeId() string {
@@ -575,7 +652,7 @@ type JobStats struct {
 
 func (x *JobStats) Reset() {
 	*x = JobStats{}
-	mi := &file_proto_depin_proto_msgTypes[6]
+	mi := &file_proto_depin_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -587,7 +664,7 @@ func (x *JobStats) String() string {
 func (*JobStats) ProtoMessage() {}
 
 func (x *JobStats) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[6]
+	mi := &file_proto_depin_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -600,7 +677,7 @@ func (x *JobStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobStats.ProtoReflect.Descriptor instead.
 func (*JobStats) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{6}
+	return file_proto_depin_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *JobStats) GetPeakCpuPercent() float64 {
@@ -617,6 +694,67 @@ func (x *JobStats) GetDurationMs() int64 {
 	return 0
 }
 
+// ArtifactInfo describes a file produced by the container in /app/output/
+type ArtifactInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Filename      string                 `protobuf:"bytes,1,opt,name=filename,proto3" json:"filename,omitempty"`                     // Relative path (e.g., "model.pt", "results/metrics.csv")
+	SizeBytes     int64                  `protobuf:"varint,2,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"` // File size
+	Content       []byte                 `protobuf:"bytes,3,opt,name=content,proto3" json:"content,omitempty"`                       // File content (for small artifacts, max ~50MB total)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArtifactInfo) Reset() {
+	*x = ArtifactInfo{}
+	mi := &file_proto_depin_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArtifactInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArtifactInfo) ProtoMessage() {}
+
+func (x *ArtifactInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_depin_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArtifactInfo.ProtoReflect.Descriptor instead.
+func (*ArtifactInfo) Descriptor() ([]byte, []int) {
+	return file_proto_depin_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ArtifactInfo) GetFilename() string {
+	if x != nil {
+		return x.Filename
+	}
+	return ""
+}
+
+func (x *ArtifactInfo) GetSizeBytes() int64 {
+	if x != nil {
+		return x.SizeBytes
+	}
+	return 0
+}
+
+func (x *ArtifactInfo) GetContent() []byte {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
 // JobResult is sent from agent back to orchestrator with execution results
 type JobResult struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -624,13 +762,14 @@ type JobResult struct {
 	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`                        // Status: "running", "completed", "failed"
 	OutputLog     string                 `protobuf:"bytes,3,opt,name=output_log,json=outputLog,proto3" json:"output_log,omitempty"` // Container output/logs
 	Stats         *JobStats              `protobuf:"bytes,4,opt,name=stats,proto3" json:"stats,omitempty"`                          // Execution statistics (optional, only on completion)
+	Artifacts     []*ArtifactInfo        `protobuf:"bytes,5,rep,name=artifacts,proto3" json:"artifacts,omitempty"`                  // Output files from /app/output/
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *JobResult) Reset() {
 	*x = JobResult{}
-	mi := &file_proto_depin_proto_msgTypes[7]
+	mi := &file_proto_depin_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -642,7 +781,7 @@ func (x *JobResult) String() string {
 func (*JobResult) ProtoMessage() {}
 
 func (x *JobResult) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[7]
+	mi := &file_proto_depin_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -655,7 +794,7 @@ func (x *JobResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobResult.ProtoReflect.Descriptor instead.
 func (*JobResult) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{7}
+	return file_proto_depin_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *JobResult) GetJobId() string {
@@ -686,6 +825,13 @@ func (x *JobResult) GetStats() *JobStats {
 	return nil
 }
 
+func (x *JobResult) GetArtifacts() []*ArtifactInfo {
+	if x != nil {
+		return x.Artifacts
+	}
+	return nil
+}
+
 // JobLog is sent from agent to orchestrator for real-time log streaming
 type JobLog struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -697,7 +843,7 @@ type JobLog struct {
 
 func (x *JobLog) Reset() {
 	*x = JobLog{}
-	mi := &file_proto_depin_proto_msgTypes[8]
+	mi := &file_proto_depin_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -709,7 +855,7 @@ func (x *JobLog) String() string {
 func (*JobLog) ProtoMessage() {}
 
 func (x *JobLog) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[8]
+	mi := &file_proto_depin_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -722,7 +868,7 @@ func (x *JobLog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobLog.ProtoReflect.Descriptor instead.
 func (*JobLog) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{8}
+	return file_proto_depin_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *JobLog) GetJobId() string {
@@ -750,7 +896,7 @@ type ResourceLimitsUpdate struct {
 
 func (x *ResourceLimitsUpdate) Reset() {
 	*x = ResourceLimitsUpdate{}
-	mi := &file_proto_depin_proto_msgTypes[9]
+	mi := &file_proto_depin_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -762,7 +908,7 @@ func (x *ResourceLimitsUpdate) String() string {
 func (*ResourceLimitsUpdate) ProtoMessage() {}
 
 func (x *ResourceLimitsUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[9]
+	mi := &file_proto_depin_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -775,7 +921,7 @@ func (x *ResourceLimitsUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceLimitsUpdate.ProtoReflect.Descriptor instead.
 func (*ResourceLimitsUpdate) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{9}
+	return file_proto_depin_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ResourceLimitsUpdate) GetLimits() *ResourceLimits {
@@ -803,7 +949,7 @@ type HeartbeatAck struct {
 
 func (x *HeartbeatAck) Reset() {
 	*x = HeartbeatAck{}
-	mi := &file_proto_depin_proto_msgTypes[10]
+	mi := &file_proto_depin_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -815,7 +961,7 @@ func (x *HeartbeatAck) String() string {
 func (*HeartbeatAck) ProtoMessage() {}
 
 func (x *HeartbeatAck) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[10]
+	mi := &file_proto_depin_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -828,7 +974,7 @@ func (x *HeartbeatAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeartbeatAck.ProtoReflect.Descriptor instead.
 func (*HeartbeatAck) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{10}
+	return file_proto_depin_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *HeartbeatAck) GetReceivedTimestampMs() int64 {
@@ -860,7 +1006,7 @@ type ServerEvent struct {
 
 func (x *ServerEvent) Reset() {
 	*x = ServerEvent{}
-	mi := &file_proto_depin_proto_msgTypes[11]
+	mi := &file_proto_depin_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -872,7 +1018,7 @@ func (x *ServerEvent) String() string {
 func (*ServerEvent) ProtoMessage() {}
 
 func (x *ServerEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[11]
+	mi := &file_proto_depin_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -885,7 +1031,7 @@ func (x *ServerEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerEvent.ProtoReflect.Descriptor instead.
 func (*ServerEvent) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{11}
+	return file_proto_depin_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ServerEvent) GetEvent() isServerEvent_Event {
@@ -960,7 +1106,7 @@ type AgentEvent struct {
 
 func (x *AgentEvent) Reset() {
 	*x = AgentEvent{}
-	mi := &file_proto_depin_proto_msgTypes[12]
+	mi := &file_proto_depin_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -972,7 +1118,7 @@ func (x *AgentEvent) String() string {
 func (*AgentEvent) ProtoMessage() {}
 
 func (x *AgentEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[12]
+	mi := &file_proto_depin_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -985,7 +1131,7 @@ func (x *AgentEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentEvent.ProtoReflect.Descriptor instead.
 func (*AgentEvent) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{12}
+	return file_proto_depin_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *AgentEvent) GetNodeId() string {
@@ -1084,7 +1230,10 @@ const file_proto_depin_proto_rawDesc = "" +
 	"\x14RegistrationResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12>\n" +
-	"\x0fresource_limits\x18\x03 \x01(\v2\x15.depin.ResourceLimitsR\x0eresourceLimits\"\x8c\x02\n" +
+	"\x0fresource_limits\x18\x03 \x01(\v2\x15.depin.ResourceLimitsR\x0eresourceLimits\"7\n" +
+	"\aJobFile\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
+	"\acontent\x18\x02 \x01(\fR\acontent\"\x80\x03\n" +
 	"\n" +
 	"JobRequest\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x14\n" +
@@ -1094,7 +1243,13 @@ const file_proto_depin_proto_rawDesc = "" +
 	"\x0fmemory_limit_mb\x18\x05 \x01(\x03R\rmemoryLimitMb\x12\x1b\n" +
 	"\tcpu_limit\x18\x06 \x01(\x02R\bcpuLimit\x12'\n" +
 	"\x0ftimeout_seconds\x18\a \x01(\x05R\x0etimeoutSeconds\x12\"\n" +
-	"\frequirements\x18\b \x03(\tR\frequirements\"\xe5\x02\n" +
+	"\frequirements\x18\b \x03(\tR\frequirements\x12$\n" +
+	"\x05files\x18\t \x03(\v2\x0e.depin.JobFileR\x05files\x12\x1e\n" +
+	"\n" +
+	"entrypoint\x18\n" +
+	" \x01(\tR\n" +
+	"entrypoint\x12,\n" +
+	"\x12max_artifact_bytes\x18\v \x01(\x03R\x10maxArtifactBytes\"\xe5\x02\n" +
 	"\tHeartbeat\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1f\n" +
 	"\vcpu_percent\x18\x02 \x01(\x01R\n" +
@@ -1115,13 +1270,19 @@ const file_proto_depin_proto_rawDesc = "" +
 	"\bJobStats\x12(\n" +
 	"\x10peak_cpu_percent\x18\x01 \x01(\x01R\x0epeakCpuPercent\x12\x1f\n" +
 	"\vduration_ms\x18\x02 \x01(\x03R\n" +
-	"durationMs\"\x80\x01\n" +
+	"durationMs\"c\n" +
+	"\fArtifactInfo\x12\x1a\n" +
+	"\bfilename\x18\x01 \x01(\tR\bfilename\x12\x1d\n" +
+	"\n" +
+	"size_bytes\x18\x02 \x01(\x03R\tsizeBytes\x12\x18\n" +
+	"\acontent\x18\x03 \x01(\fR\acontent\"\xb3\x01\n" +
 	"\tJobResult\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x1d\n" +
 	"\n" +
 	"output_log\x18\x03 \x01(\tR\toutputLog\x12%\n" +
-	"\x05stats\x18\x04 \x01(\v2\x0f.depin.JobStatsR\x05stats\"3\n" +
+	"\x05stats\x18\x04 \x01(\v2\x0f.depin.JobStatsR\x05stats\x121\n" +
+	"\tartifacts\x18\x05 \x03(\v2\x13.depin.ArtifactInfoR\tartifacts\"3\n" +
 	"\x06JobLog\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x12\n" +
 	"\x04line\x18\x02 \x01(\tR\x04line\"d\n" +
@@ -1162,42 +1323,46 @@ func file_proto_depin_proto_rawDescGZIP() []byte {
 	return file_proto_depin_proto_rawDescData
 }
 
-var file_proto_depin_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_proto_depin_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_proto_depin_proto_goTypes = []any{
 	(*GPUInfo)(nil),              // 0: depin.GPUInfo
 	(*ResourceLimits)(nil),       // 1: depin.ResourceLimits
 	(*NodeInfo)(nil),             // 2: depin.NodeInfo
 	(*RegistrationResponse)(nil), // 3: depin.RegistrationResponse
-	(*JobRequest)(nil),           // 4: depin.JobRequest
-	(*Heartbeat)(nil),            // 5: depin.Heartbeat
-	(*JobStats)(nil),             // 6: depin.JobStats
-	(*JobResult)(nil),            // 7: depin.JobResult
-	(*JobLog)(nil),               // 8: depin.JobLog
-	(*ResourceLimitsUpdate)(nil), // 9: depin.ResourceLimitsUpdate
-	(*HeartbeatAck)(nil),         // 10: depin.HeartbeatAck
-	(*ServerEvent)(nil),          // 11: depin.ServerEvent
-	(*AgentEvent)(nil),           // 12: depin.AgentEvent
+	(*JobFile)(nil),              // 4: depin.JobFile
+	(*JobRequest)(nil),           // 5: depin.JobRequest
+	(*Heartbeat)(nil),            // 6: depin.Heartbeat
+	(*JobStats)(nil),             // 7: depin.JobStats
+	(*ArtifactInfo)(nil),         // 8: depin.ArtifactInfo
+	(*JobResult)(nil),            // 9: depin.JobResult
+	(*JobLog)(nil),               // 10: depin.JobLog
+	(*ResourceLimitsUpdate)(nil), // 11: depin.ResourceLimitsUpdate
+	(*HeartbeatAck)(nil),         // 12: depin.HeartbeatAck
+	(*ServerEvent)(nil),          // 13: depin.ServerEvent
+	(*AgentEvent)(nil),           // 14: depin.AgentEvent
 }
 var file_proto_depin_proto_depIdxs = []int32{
 	0,  // 0: depin.NodeInfo.gpu_info:type_name -> depin.GPUInfo
 	1,  // 1: depin.RegistrationResponse.resource_limits:type_name -> depin.ResourceLimits
-	6,  // 2: depin.JobResult.stats:type_name -> depin.JobStats
-	1,  // 3: depin.ResourceLimitsUpdate.limits:type_name -> depin.ResourceLimits
-	4,  // 4: depin.ServerEvent.job_request:type_name -> depin.JobRequest
-	9,  // 5: depin.ServerEvent.resource_limits_update:type_name -> depin.ResourceLimitsUpdate
-	10, // 6: depin.ServerEvent.heartbeat_ack:type_name -> depin.HeartbeatAck
-	5,  // 7: depin.AgentEvent.heartbeat:type_name -> depin.Heartbeat
-	7,  // 8: depin.AgentEvent.job_result:type_name -> depin.JobResult
-	8,  // 9: depin.AgentEvent.job_log:type_name -> depin.JobLog
-	2,  // 10: depin.NodeService.Register:input_type -> depin.NodeInfo
-	12, // 11: depin.NodeService.StreamEvents:input_type -> depin.AgentEvent
-	3,  // 12: depin.NodeService.Register:output_type -> depin.RegistrationResponse
-	11, // 13: depin.NodeService.StreamEvents:output_type -> depin.ServerEvent
-	12, // [12:14] is the sub-list for method output_type
-	10, // [10:12] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	4,  // 2: depin.JobRequest.files:type_name -> depin.JobFile
+	7,  // 3: depin.JobResult.stats:type_name -> depin.JobStats
+	8,  // 4: depin.JobResult.artifacts:type_name -> depin.ArtifactInfo
+	1,  // 5: depin.ResourceLimitsUpdate.limits:type_name -> depin.ResourceLimits
+	5,  // 6: depin.ServerEvent.job_request:type_name -> depin.JobRequest
+	11, // 7: depin.ServerEvent.resource_limits_update:type_name -> depin.ResourceLimitsUpdate
+	12, // 8: depin.ServerEvent.heartbeat_ack:type_name -> depin.HeartbeatAck
+	6,  // 9: depin.AgentEvent.heartbeat:type_name -> depin.Heartbeat
+	9,  // 10: depin.AgentEvent.job_result:type_name -> depin.JobResult
+	10, // 11: depin.AgentEvent.job_log:type_name -> depin.JobLog
+	2,  // 12: depin.NodeService.Register:input_type -> depin.NodeInfo
+	14, // 13: depin.NodeService.StreamEvents:input_type -> depin.AgentEvent
+	3,  // 14: depin.NodeService.Register:output_type -> depin.RegistrationResponse
+	13, // 15: depin.NodeService.StreamEvents:output_type -> depin.ServerEvent
+	14, // [14:16] is the sub-list for method output_type
+	12, // [12:14] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_proto_depin_proto_init() }
@@ -1205,12 +1370,12 @@ func file_proto_depin_proto_init() {
 	if File_proto_depin_proto != nil {
 		return
 	}
-	file_proto_depin_proto_msgTypes[11].OneofWrappers = []any{
+	file_proto_depin_proto_msgTypes[13].OneofWrappers = []any{
 		(*ServerEvent_JobRequest)(nil),
 		(*ServerEvent_ResourceLimitsUpdate)(nil),
 		(*ServerEvent_HeartbeatAck)(nil),
 	}
-	file_proto_depin_proto_msgTypes[12].OneofWrappers = []any{
+	file_proto_depin_proto_msgTypes[14].OneofWrappers = []any{
 		(*AgentEvent_Heartbeat)(nil),
 		(*AgentEvent_JobResult)(nil),
 		(*AgentEvent_JobLog)(nil),
@@ -1221,7 +1386,7 @@ func file_proto_depin_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_depin_proto_rawDesc), len(file_proto_depin_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
