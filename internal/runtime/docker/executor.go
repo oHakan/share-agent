@@ -260,12 +260,29 @@ func (e *Executor) upsertIptablesRule(dest string, action string) error {
 // This is needed because the agent process itself may not have root/iptables access,
 // but it can create a privileged container with host network namespace to run iptables.
 func (e *Executor) runHostCommand(cmd []string) (int, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
+	const helperImage = "alpine:latest"
+
+	// Ensure the helper image is available locally
+	_, _, err := e.client.ImageInspectWithRaw(ctx, helperImage)
+	if err != nil {
+		reader, pullErr := e.client.ImagePull(ctx, helperImage, image.PullOptions{})
+		if pullErr != nil {
+			return -1, fmt.Errorf("failed to pull helper image %s: %w", helperImage, pullErr)
+		}
+		// Drain the pull output to completion
+		io.Copy(io.Discard, reader)
+		reader.Close()
+	}
+
+	// Wrap the command to install iptables first (alpine base doesn't include it)
+	shellCmd := "apk add -q --no-cache iptables && " + shellJoin(cmd)
 	resp, err := e.client.ContainerCreate(ctx, &container.Config{
-		Image: "alpine:latest",
-		Cmd:   cmd,
+		Image:      helperImage,
+		Cmd:        []string{"sh", "-c", shellCmd},
+		Entrypoint: []string{},
 	}, &container.HostConfig{
 		NetworkMode: "host",
 		CapAdd:      []string{"NET_ADMIN"},
@@ -292,6 +309,15 @@ func (e *Executor) runHostCommand(cmd []string) (int, error) {
 	}
 
 	return -1, nil
+}
+
+// shellJoin quotes arguments for safe use in a sh -c command string.
+func shellJoin(args []string) string {
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = "'" + strings.ReplaceAll(a, "'", "'\"'\"'") + "'"
+	}
+	return strings.Join(quoted, " ")
 }
 
 // RuntimeType defines how the container should be executed.

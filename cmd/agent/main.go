@@ -420,6 +420,19 @@ func createJobHandler(executor *docker.Executor, limitsStore *limits.Store, log 
 			runtimeType = docker.RuntimePersistentService
 		}
 
+		// Auto-detect DOCKER_IMAGE mode: if runtime_type is default (SCRIPT)
+		// but no script/command/files were provided, the orchestrator likely
+		// intended DOCKER_IMAGE mode (protobuf defaults enum fields to 0).
+		if runtimeType == docker.RuntimeScript &&
+			req.ScriptContent == "" && len(req.Command) == 0 && len(req.Files) == 0 &&
+			req.Image != "" {
+			runtimeType = docker.RuntimeDockerImage
+			log.Info("Auto-detected DOCKER_IMAGE mode (no script/command/files provided)",
+				zap.String("job_id", req.JobId),
+				zap.String("image", req.Image),
+			)
+		}
+
 		// Validate: each runtime type has different requirements
 		switch runtimeType {
 		case docker.RuntimeScript:
