@@ -4,6 +4,13 @@ package depin;
 
 option go_package = "github.com/oHakan/depin-orchestrator/proto";
 
+// RuntimeType defines how the container should be executed
+enum RuntimeType {
+  RUNTIME_SCRIPT = 0;             // Inject script file, run with interpreter (default, backward compat)
+  RUNTIME_DOCKER_IMAGE = 1;       // Custom Docker image + command, no script injection
+  RUNTIME_PERSISTENT_SERVICE = 2; // Long-running container with health checks and port exposure
+}
+
 // GPUInfo contains detailed specifications for a single GPU
 message GPUInfo {
   string name = 1;             // GPU model name (e.g. "NVIDIA GeForce RTX 4090")
@@ -26,14 +33,15 @@ message NodeInfo {
   uint64 vram_total = 3;      // Total VRAM in bytes
   uint64 vram_free = 4;       // Available VRAM in bytes
   string docker_version = 5;  // Docker version installed on the node
-  
-  // New hardware specs
+
+  // Hardware specs
   string cpu_model = 7;       // CPU model (e.g. "Intel Core i9-13900K")
   int32 cpu_cores = 8;        // Physical cores
   int64 ram_total_mb = 9;     // Total RAM in Megabytes
   int64 disk_total_gb = 10;   // Total Disk Space in GB
   string os_info = 11;        // OS Info (e.g. "Ubuntu 22.04 LTS")
   repeated GPUInfo gpu_info = 12; // List of GPUs in the node
+  string agent_version = 13;     // Agent software version
 }
 
 // RegistrationResponse is returned after a node registration attempt
@@ -49,19 +57,45 @@ message JobFile {
   bytes content = 2;     // File content
 }
 
+// HealthCheck defines how to verify a persistent service is running correctly
+message HealthCheck {
+  string endpoint = 1;            // HTTP path to check (e.g., "/health", "/ready")
+  int32 port = 2;                 // Port to check on the container
+  int32 interval_seconds = 3;     // Check interval (default: 30)
+  int32 timeout_seconds = 4;      // Per-check timeout (default: 5)
+  int32 retries = 5;              // Consecutive failures before marking unhealthy (default: 3)
+  int32 initial_delay_seconds = 6; // Wait before first check (default: 10)
+}
+
+// PortMapping maps a container port to a host port for external access
+message PortMapping {
+  int32 container_port = 1;       // Port inside the container
+  int32 host_port = 2;            // Port on the host (0 = auto-assign)
+  string protocol = 3;            // "tcp" or "udp" (default: "tcp")
+}
+
 // JobRequest is sent from orchestrator to agent to execute a container
 message JobRequest {
   string job_id = 1;           // Unique identifier for this job
-  string image = 2;            // Docker image to run (e.g., "alpine")
-  repeated string command = 3; // Command to execute in the container
-  string script_content = 4;   // Raw Python script content to execute (injected as task.py for backward compat)
+  string image = 2;            // Docker image to run (e.g., "python:3.11-slim", "node:20", "alpine")
+  repeated string command = 3; // Command to execute (e.g., ["python", "train.py"] or ["node", "server.js"])
+  string script_content = 4;   // Script content to inject (used with RUNTIME_SCRIPT, injected as entrypoint file)
   int64 memory_limit_mb = 5;   // Memory limit in MB (e.g., 512 for 512MB)
   float cpu_limit = 6;         // CPU limit (e.g., 0.5 for half core, 1.0 for one core)
-  int32 timeout_seconds = 7;   // Execution timeout in seconds (e.g., 60)
-  repeated string requirements = 8; // Python dependencies to install (e.g., ["numpy", "pandas"])
+  int32 timeout_seconds = 7;   // Execution timeout in seconds (0 = no timeout for services)
+  repeated string requirements = 8; // Package dependencies to install before execution (e.g., ["numpy", "express"])
   repeated JobFile files = 9;       // Additional files to inject into /app
-  string entrypoint = 10;           // Script to execute (default: "task.py")
+  string entrypoint = 10;           // Script filename to execute (default: "task.py" for SCRIPT mode)
   int64 max_artifact_bytes = 11;    // Max artifact output size in bytes (0 = no artifact collection)
+
+  // Phase 1: Universal compute fields
+  RuntimeType runtime_type = 12;              // Execution mode (default: RUNTIME_SCRIPT)
+  map<string, string> environment = 13;       // User-defined environment variables
+  repeated PortMapping port_mappings = 14;    // Ports to expose (for PERSISTENT_SERVICE)
+  HealthCheck health_check = 15;              // Health check config (for PERSISTENT_SERVICE)
+  int32 gpu_count = 16;                       // GPUs requested (0 = CPU only, -1 = all available)
+  int64 shm_size_mb = 17;                     // Override shared memory size (0 = auto-calculate)
+  string install_command = 18;                // Custom dependency install command (e.g., "npm install", "pip install -r requirements.txt")
 }
 
 // Heartbeat contains real-time telemetry data for live graphs
@@ -77,6 +111,7 @@ message Heartbeat {
   string gpu_model = 9;    // GPU Model name
   string timestamp = 10;   // Timestamp of the heartbeat
   int64 sent_timestamp_ms = 11; // Unix timestamp in milliseconds when heartbeat was sent (for RTT calculation)
+  repeated string running_jobs = 12; // Job IDs currently executing on this node
 }
 
 // JobStats contains execution statistics for completed jobs
@@ -107,6 +142,14 @@ message JobLog {
   string line = 2;    // Single log line from container stdout/stderr
 }
 
+// ServiceStatus reports the state of a persistent service (agent -> orchestrator)
+message ServiceStatus {
+  string job_id = 1;                   // Job ID of the service
+  string status = 2;                   // "starting", "healthy", "unhealthy", "stopped"
+  map<string, int32> port_map = 3;     // container_port -> actual_host_port mapping
+  string health_message = 4;           // Human-readable status detail
+}
+
 // ResourceLimitsUpdate is sent from orchestrator to agent when limits change
 message ResourceLimitsUpdate {
   ResourceLimits limits = 1;   // New resource limits
@@ -119,12 +162,19 @@ message HeartbeatAck {
   int64 sent_timestamp_ms = 2;     // Echo of agent's sent_timestamp_ms for RTT calculation
 }
 
+// StopService is sent from orchestrator to agent to stop a persistent service
+message StopService {
+  string job_id = 1;            // Job ID of the service to stop
+  int32 grace_period_seconds = 2; // Time to wait before force kill (default: 30)
+}
+
 // ServerEvent wraps messages sent from orchestrator to agent
 message ServerEvent {
   oneof event {
     JobRequest job_request = 1;
     ResourceLimitsUpdate resource_limits_update = 2;
     HeartbeatAck heartbeat_ack = 3;
+    StopService stop_service = 4;
   }
 }
 
@@ -132,9 +182,10 @@ message ServerEvent {
 message AgentEvent {
   string node_id = 1;  // Identifies which agent is sending this event
   oneof event {
-    Heartbeat heartbeat = 2;    // Real-time telemetry (every 3s)
-    JobResult job_result = 3;   // Result of a job execution
-    JobLog job_log = 4;         // Real-time log line from job execution
+    Heartbeat heartbeat = 2;          // Real-time telemetry (every 3s)
+    JobResult job_result = 3;         // Result of a job execution
+    JobLog job_log = 4;               // Real-time log line from job execution
+    ServiceStatus service_status = 5; // Persistent service health/state update
   }
 }
 
@@ -142,9 +193,9 @@ message AgentEvent {
 service NodeService {
   // Register registers a new node with the orchestrator
   rpc Register(NodeInfo) returns (RegistrationResponse) {}
-  
+
   // StreamEvents establishes a bidirectional stream for real-time communication
-  // Agent sends AgentEvents (heartbeats, job results)
-  // Orchestrator sends ServerEvents (job requests)
+  // Agent sends AgentEvents (heartbeats, job results, service status)
+  // Orchestrator sends ServerEvents (job requests, limit updates, stop signals)
   rpc StreamEvents(stream AgentEvent) returns (stream ServerEvent) {}
 }

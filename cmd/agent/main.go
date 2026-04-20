@@ -411,14 +411,29 @@ func createJobHandler(executor *docker.Executor, limitsStore *limits.Store, log 
 			return result
 		}
 
-		// Validate that we have something to execute
-		if req.ScriptContent == "" && len(req.Files) == 0 {
-			result.Status = "failed"
-			result.OutputLog = "No script content or files provided"
-			log.Error("Job failed - no script content or files",
-				zap.String("job_id", req.JobId),
-			)
-			return result
+		// Determine runtime type
+		runtimeType := docker.RuntimeScript
+		switch req.RuntimeType {
+		case pb.RuntimeType_RUNTIME_DOCKER_IMAGE:
+			runtimeType = docker.RuntimeDockerImage
+		case pb.RuntimeType_RUNTIME_PERSISTENT_SERVICE:
+			runtimeType = docker.RuntimePersistentService
+		}
+
+		// Validate: each runtime type has different requirements
+		switch runtimeType {
+		case docker.RuntimeScript:
+			if req.ScriptContent == "" && len(req.Command) == 0 && len(req.Files) == 0 {
+				result.Status = "failed"
+				result.OutputLog = "SCRIPT mode requires script_content, command, or files"
+				return result
+			}
+		case docker.RuntimeDockerImage, docker.RuntimePersistentService:
+			if req.Image == "" {
+				result.Status = "failed"
+				result.OutputLog = "DOCKER_IMAGE/PERSISTENT_SERVICE mode requires an image"
+				return result
+			}
 		}
 
 		// Clamp resource requests to configured limits
@@ -428,16 +443,16 @@ func createJobHandler(executor *docker.Executor, limitsStore *limits.Store, log 
 		log.Info("Executing job",
 			zap.String("job_id", req.JobId),
 			zap.String("image", req.Image),
-			zap.Int("script_length", len(req.ScriptContent)),
+			zap.String("runtime_type", runtimeType),
+			zap.Strings("command", req.Command),
 			zap.Int("file_count", len(req.Files)),
-			zap.String("entrypoint", req.Entrypoint),
-			zap.Strings("requirements", req.Requirements),
 			zap.Float64("cpu_limit", clampedCPU),
 			zap.Int64("memory_limit_mb", clampedMemoryMB),
+			zap.Int32("gpu_count", req.GpuCount),
 		)
 
 		fmt.Println(formatter.Info(
-			fmt.Sprintf("Job %s started", req.JobId),
+			fmt.Sprintf("Job %s started [%s]", req.JobId, runtimeType),
 			fmt.Sprintf("image=%s cpu=%.2f mem=%dMB vol=%dGB", req.Image, clampedCPU, clampedMemoryMB, volumeLimitGB),
 		))
 
@@ -447,6 +462,39 @@ func createJobHandler(executor *docker.Executor, limitsStore *limits.Store, log 
 			filesMap = make(map[string][]byte, len(req.Files))
 			for _, f := range req.Files {
 				filesMap[f.Path] = f.Content
+			}
+		}
+
+		// Build environment map from proto
+		var envMap map[string]string
+		if len(req.Environment) > 0 {
+			envMap = req.Environment
+		}
+
+		// Build port mappings from proto
+		var portMappings []docker.PortMapping
+		for _, pm := range req.PortMappings {
+			protocol := pm.Protocol
+			if protocol == "" {
+				protocol = "tcp"
+			}
+			portMappings = append(portMappings, docker.PortMapping{
+				ContainerPort: int(pm.ContainerPort),
+				HostPort:      int(pm.HostPort),
+				Protocol:      protocol,
+			})
+		}
+
+		// Build health check from proto
+		var healthCheck *docker.HealthCheckConfig
+		if req.HealthCheck != nil {
+			healthCheck = &docker.HealthCheckConfig{
+				Endpoint:           req.HealthCheck.Endpoint,
+				Port:               int(req.HealthCheck.Port),
+				IntervalSeconds:    int(req.HealthCheck.IntervalSeconds),
+				TimeoutSeconds:     int(req.HealthCheck.TimeoutSeconds),
+				Retries:            int(req.HealthCheck.Retries),
+				InitialDelaySeconds: int(req.HealthCheck.InitialDelaySeconds),
 			}
 		}
 
@@ -461,6 +509,13 @@ func createJobHandler(executor *docker.Executor, limitsStore *limits.Store, log 
 			Entrypoint:       req.Entrypoint,
 			Command:          req.Command,
 			MaxArtifactBytes: req.MaxArtifactBytes,
+			RuntimeType:      runtimeType,
+			Environment:      envMap,
+			PortMappings:     portMappings,
+			HealthCheck:      healthCheck,
+			GpuCount:         int(req.GpuCount),
+			ShmSizeMB:        req.ShmSizeMb,
+			InstallCommand:   req.InstallCommand,
 		}
 
 		startTime := time.Now()
@@ -555,6 +610,9 @@ func capacityToNodeInfo(capacity *NodeCapacity, cfg *config.Config, log *zap.Log
 	if capacity.Docker != nil && capacity.Docker.Available {
 		nodeInfo.DockerVersion = capacity.Docker.ServerVersion
 	}
+
+	// Agent version
+	nodeInfo.AgentVersion = cfg.AgentVersion
 
 	return nodeInfo
 }

@@ -21,6 +21,56 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// RuntimeType defines how the container should be executed
+type RuntimeType int32
+
+const (
+	RuntimeType_RUNTIME_SCRIPT             RuntimeType = 0 // Inject script file, run with interpreter (default, backward compat)
+	RuntimeType_RUNTIME_DOCKER_IMAGE       RuntimeType = 1 // Custom Docker image + command, no script injection
+	RuntimeType_RUNTIME_PERSISTENT_SERVICE RuntimeType = 2 // Long-running container with health checks and port exposure
+)
+
+// Enum value maps for RuntimeType.
+var (
+	RuntimeType_name = map[int32]string{
+		0: "RUNTIME_SCRIPT",
+		1: "RUNTIME_DOCKER_IMAGE",
+		2: "RUNTIME_PERSISTENT_SERVICE",
+	}
+	RuntimeType_value = map[string]int32{
+		"RUNTIME_SCRIPT":             0,
+		"RUNTIME_DOCKER_IMAGE":       1,
+		"RUNTIME_PERSISTENT_SERVICE": 2,
+	}
+)
+
+func (x RuntimeType) Enum() *RuntimeType {
+	p := new(RuntimeType)
+	*p = x
+	return p
+}
+
+func (x RuntimeType) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RuntimeType) Descriptor() protoreflect.EnumDescriptor {
+	return file_proto_depin_proto_enumTypes[0].Descriptor()
+}
+
+func (RuntimeType) Type() protoreflect.EnumType {
+	return &file_proto_depin_proto_enumTypes[0]
+}
+
+func (x RuntimeType) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RuntimeType.Descriptor instead.
+func (RuntimeType) EnumDescriptor() ([]byte, []int) {
+	return file_proto_depin_proto_rawDescGZIP(), []int{0}
+}
+
 // GPUInfo contains detailed specifications for a single GPU
 type GPUInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -159,13 +209,14 @@ type NodeInfo struct {
 	VramTotal     uint64                 `protobuf:"varint,3,opt,name=vram_total,json=vramTotal,proto3" json:"vram_total,omitempty"`            // Total VRAM in bytes
 	VramFree      uint64                 `protobuf:"varint,4,opt,name=vram_free,json=vramFree,proto3" json:"vram_free,omitempty"`               // Available VRAM in bytes
 	DockerVersion string                 `protobuf:"bytes,5,opt,name=docker_version,json=dockerVersion,proto3" json:"docker_version,omitempty"` // Docker version installed on the node
-	// New hardware specs
+	// Hardware specs
 	CpuModel      string     `protobuf:"bytes,7,opt,name=cpu_model,json=cpuModel,proto3" json:"cpu_model,omitempty"`              // CPU model (e.g. "Intel Core i9-13900K")
 	CpuCores      int32      `protobuf:"varint,8,opt,name=cpu_cores,json=cpuCores,proto3" json:"cpu_cores,omitempty"`             // Physical cores
 	RamTotalMb    int64      `protobuf:"varint,9,opt,name=ram_total_mb,json=ramTotalMb,proto3" json:"ram_total_mb,omitempty"`     // Total RAM in Megabytes
 	DiskTotalGb   int64      `protobuf:"varint,10,opt,name=disk_total_gb,json=diskTotalGb,proto3" json:"disk_total_gb,omitempty"` // Total Disk Space in GB
 	OsInfo        string     `protobuf:"bytes,11,opt,name=os_info,json=osInfo,proto3" json:"os_info,omitempty"`                   // OS Info (e.g. "Ubuntu 22.04 LTS")
 	GpuInfo       []*GPUInfo `protobuf:"bytes,12,rep,name=gpu_info,json=gpuInfo,proto3" json:"gpu_info,omitempty"`                // List of GPUs in the node
+	AgentVersion  string     `protobuf:"bytes,13,opt,name=agent_version,json=agentVersion,proto3" json:"agent_version,omitempty"` // Agent software version
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -275,6 +326,13 @@ func (x *NodeInfo) GetGpuInfo() []*GPUInfo {
 		return x.GpuInfo
 	}
 	return nil
+}
+
+func (x *NodeInfo) GetAgentVersion() string {
+	if x != nil {
+		return x.AgentVersion
+	}
+	return ""
 }
 
 // RegistrationResponse is returned after a node registration attempt
@@ -391,27 +449,181 @@ func (x *JobFile) GetContent() []byte {
 	return nil
 }
 
+// HealthCheck defines how to verify a persistent service is running correctly
+type HealthCheck struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	Endpoint            string                 `protobuf:"bytes,1,opt,name=endpoint,proto3" json:"endpoint,omitempty"`                                                     // HTTP path to check (e.g., "/health", "/ready")
+	Port                int32                  `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`                                                            // Port to check on the container
+	IntervalSeconds     int32                  `protobuf:"varint,3,opt,name=interval_seconds,json=intervalSeconds,proto3" json:"interval_seconds,omitempty"`               // Check interval (default: 30)
+	TimeoutSeconds      int32                  `protobuf:"varint,4,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`                  // Per-check timeout (default: 5)
+	Retries             int32                  `protobuf:"varint,5,opt,name=retries,proto3" json:"retries,omitempty"`                                                      // Consecutive failures before marking unhealthy (default: 3)
+	InitialDelaySeconds int32                  `protobuf:"varint,6,opt,name=initial_delay_seconds,json=initialDelaySeconds,proto3" json:"initial_delay_seconds,omitempty"` // Wait before first check (default: 10)
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *HealthCheck) Reset() {
+	*x = HealthCheck{}
+	mi := &file_proto_depin_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HealthCheck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HealthCheck) ProtoMessage() {}
+
+func (x *HealthCheck) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_depin_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HealthCheck.ProtoReflect.Descriptor instead.
+func (*HealthCheck) Descriptor() ([]byte, []int) {
+	return file_proto_depin_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *HealthCheck) GetEndpoint() string {
+	if x != nil {
+		return x.Endpoint
+	}
+	return ""
+}
+
+func (x *HealthCheck) GetPort() int32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *HealthCheck) GetIntervalSeconds() int32 {
+	if x != nil {
+		return x.IntervalSeconds
+	}
+	return 0
+}
+
+func (x *HealthCheck) GetTimeoutSeconds() int32 {
+	if x != nil {
+		return x.TimeoutSeconds
+	}
+	return 0
+}
+
+func (x *HealthCheck) GetRetries() int32 {
+	if x != nil {
+		return x.Retries
+	}
+	return 0
+}
+
+func (x *HealthCheck) GetInitialDelaySeconds() int32 {
+	if x != nil {
+		return x.InitialDelaySeconds
+	}
+	return 0
+}
+
+// PortMapping maps a container port to a host port for external access
+type PortMapping struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ContainerPort int32                  `protobuf:"varint,1,opt,name=container_port,json=containerPort,proto3" json:"container_port,omitempty"` // Port inside the container
+	HostPort      int32                  `protobuf:"varint,2,opt,name=host_port,json=hostPort,proto3" json:"host_port,omitempty"`                // Port on the host (0 = auto-assign)
+	Protocol      string                 `protobuf:"bytes,3,opt,name=protocol,proto3" json:"protocol,omitempty"`                                 // "tcp" or "udp" (default: "tcp")
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PortMapping) Reset() {
+	*x = PortMapping{}
+	mi := &file_proto_depin_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PortMapping) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PortMapping) ProtoMessage() {}
+
+func (x *PortMapping) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_depin_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PortMapping.ProtoReflect.Descriptor instead.
+func (*PortMapping) Descriptor() ([]byte, []int) {
+	return file_proto_depin_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *PortMapping) GetContainerPort() int32 {
+	if x != nil {
+		return x.ContainerPort
+	}
+	return 0
+}
+
+func (x *PortMapping) GetHostPort() int32 {
+	if x != nil {
+		return x.HostPort
+	}
+	return 0
+}
+
+func (x *PortMapping) GetProtocol() string {
+	if x != nil {
+		return x.Protocol
+	}
+	return ""
+}
+
 // JobRequest is sent from orchestrator to agent to execute a container
 type JobRequest struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	JobId            string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`                                      // Unique identifier for this job
-	Image            string                 `protobuf:"bytes,2,opt,name=image,proto3" json:"image,omitempty"`                                                   // Docker image to run (e.g., "alpine")
-	Command          []string               `protobuf:"bytes,3,rep,name=command,proto3" json:"command,omitempty"`                                               // Command to execute in the container
-	ScriptContent    string                 `protobuf:"bytes,4,opt,name=script_content,json=scriptContent,proto3" json:"script_content,omitempty"`              // Raw Python script content to execute (injected as task.py for backward compat)
+	Image            string                 `protobuf:"bytes,2,opt,name=image,proto3" json:"image,omitempty"`                                                   // Docker image to run (e.g., "python:3.11-slim", "node:20", "alpine")
+	Command          []string               `protobuf:"bytes,3,rep,name=command,proto3" json:"command,omitempty"`                                               // Command to execute (e.g., ["python", "train.py"] or ["node", "server.js"])
+	ScriptContent    string                 `protobuf:"bytes,4,opt,name=script_content,json=scriptContent,proto3" json:"script_content,omitempty"`              // Script content to inject (used with RUNTIME_SCRIPT, injected as entrypoint file)
 	MemoryLimitMb    int64                  `protobuf:"varint,5,opt,name=memory_limit_mb,json=memoryLimitMb,proto3" json:"memory_limit_mb,omitempty"`           // Memory limit in MB (e.g., 512 for 512MB)
 	CpuLimit         float32                `protobuf:"fixed32,6,opt,name=cpu_limit,json=cpuLimit,proto3" json:"cpu_limit,omitempty"`                           // CPU limit (e.g., 0.5 for half core, 1.0 for one core)
-	TimeoutSeconds   int32                  `protobuf:"varint,7,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`          // Execution timeout in seconds (e.g., 60)
-	Requirements     []string               `protobuf:"bytes,8,rep,name=requirements,proto3" json:"requirements,omitempty"`                                     // Python dependencies to install (e.g., ["numpy", "pandas"])
+	TimeoutSeconds   int32                  `protobuf:"varint,7,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`          // Execution timeout in seconds (0 = no timeout for services)
+	Requirements     []string               `protobuf:"bytes,8,rep,name=requirements,proto3" json:"requirements,omitempty"`                                     // Package dependencies to install before execution (e.g., ["numpy", "express"])
 	Files            []*JobFile             `protobuf:"bytes,9,rep,name=files,proto3" json:"files,omitempty"`                                                   // Additional files to inject into /app
-	Entrypoint       string                 `protobuf:"bytes,10,opt,name=entrypoint,proto3" json:"entrypoint,omitempty"`                                        // Script to execute (default: "task.py")
+	Entrypoint       string                 `protobuf:"bytes,10,opt,name=entrypoint,proto3" json:"entrypoint,omitempty"`                                        // Script filename to execute (default: "task.py" for SCRIPT mode)
 	MaxArtifactBytes int64                  `protobuf:"varint,11,opt,name=max_artifact_bytes,json=maxArtifactBytes,proto3" json:"max_artifact_bytes,omitempty"` // Max artifact output size in bytes (0 = no artifact collection)
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Phase 1: Universal compute fields
+	RuntimeType    RuntimeType       `protobuf:"varint,12,opt,name=runtime_type,json=runtimeType,proto3,enum=depin.RuntimeType" json:"runtime_type,omitempty"`                                // Execution mode (default: RUNTIME_SCRIPT)
+	Environment    map[string]string `protobuf:"bytes,13,rep,name=environment,proto3" json:"environment,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // User-defined environment variables
+	PortMappings   []*PortMapping    `protobuf:"bytes,14,rep,name=port_mappings,json=portMappings,proto3" json:"port_mappings,omitempty"`                                                     // Ports to expose (for PERSISTENT_SERVICE)
+	HealthCheck    *HealthCheck      `protobuf:"bytes,15,opt,name=health_check,json=healthCheck,proto3" json:"health_check,omitempty"`                                                        // Health check config (for PERSISTENT_SERVICE)
+	GpuCount       int32             `protobuf:"varint,16,opt,name=gpu_count,json=gpuCount,proto3" json:"gpu_count,omitempty"`                                                                // GPUs requested (0 = CPU only, -1 = all available)
+	ShmSizeMb      int64             `protobuf:"varint,17,opt,name=shm_size_mb,json=shmSizeMb,proto3" json:"shm_size_mb,omitempty"`                                                           // Override shared memory size (0 = auto-calculate)
+	InstallCommand string            `protobuf:"bytes,18,opt,name=install_command,json=installCommand,proto3" json:"install_command,omitempty"`                                               // Custom dependency install command (e.g., "npm install", "pip install -r requirements.txt")
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *JobRequest) Reset() {
 	*x = JobRequest{}
-	mi := &file_proto_depin_proto_msgTypes[5]
+	mi := &file_proto_depin_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -423,7 +635,7 @@ func (x *JobRequest) String() string {
 func (*JobRequest) ProtoMessage() {}
 
 func (x *JobRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[5]
+	mi := &file_proto_depin_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -436,7 +648,7 @@ func (x *JobRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobRequest.ProtoReflect.Descriptor instead.
 func (*JobRequest) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{5}
+	return file_proto_depin_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *JobRequest) GetJobId() string {
@@ -516,6 +728,55 @@ func (x *JobRequest) GetMaxArtifactBytes() int64 {
 	return 0
 }
 
+func (x *JobRequest) GetRuntimeType() RuntimeType {
+	if x != nil {
+		return x.RuntimeType
+	}
+	return RuntimeType_RUNTIME_SCRIPT
+}
+
+func (x *JobRequest) GetEnvironment() map[string]string {
+	if x != nil {
+		return x.Environment
+	}
+	return nil
+}
+
+func (x *JobRequest) GetPortMappings() []*PortMapping {
+	if x != nil {
+		return x.PortMappings
+	}
+	return nil
+}
+
+func (x *JobRequest) GetHealthCheck() *HealthCheck {
+	if x != nil {
+		return x.HealthCheck
+	}
+	return nil
+}
+
+func (x *JobRequest) GetGpuCount() int32 {
+	if x != nil {
+		return x.GpuCount
+	}
+	return 0
+}
+
+func (x *JobRequest) GetShmSizeMb() int64 {
+	if x != nil {
+		return x.ShmSizeMb
+	}
+	return 0
+}
+
+func (x *JobRequest) GetInstallCommand() string {
+	if x != nil {
+		return x.InstallCommand
+	}
+	return ""
+}
+
 // Heartbeat contains real-time telemetry data for live graphs
 type Heartbeat struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
@@ -530,13 +791,14 @@ type Heartbeat struct {
 	GpuModel        string                 `protobuf:"bytes,9,opt,name=gpu_model,json=gpuModel,proto3" json:"gpu_model,omitempty"`                          // GPU Model name
 	Timestamp       string                 `protobuf:"bytes,10,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                                       // Timestamp of the heartbeat
 	SentTimestampMs int64                  `protobuf:"varint,11,opt,name=sent_timestamp_ms,json=sentTimestampMs,proto3" json:"sent_timestamp_ms,omitempty"` // Unix timestamp in milliseconds when heartbeat was sent (for RTT calculation)
+	RunningJobs     []string               `protobuf:"bytes,12,rep,name=running_jobs,json=runningJobs,proto3" json:"running_jobs,omitempty"`                // Job IDs currently executing on this node
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Heartbeat) Reset() {
 	*x = Heartbeat{}
-	mi := &file_proto_depin_proto_msgTypes[6]
+	mi := &file_proto_depin_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -548,7 +810,7 @@ func (x *Heartbeat) String() string {
 func (*Heartbeat) ProtoMessage() {}
 
 func (x *Heartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[6]
+	mi := &file_proto_depin_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -561,7 +823,7 @@ func (x *Heartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Heartbeat.ProtoReflect.Descriptor instead.
 func (*Heartbeat) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{6}
+	return file_proto_depin_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Heartbeat) GetNodeId() string {
@@ -641,6 +903,13 @@ func (x *Heartbeat) GetSentTimestampMs() int64 {
 	return 0
 }
 
+func (x *Heartbeat) GetRunningJobs() []string {
+	if x != nil {
+		return x.RunningJobs
+	}
+	return nil
+}
+
 // JobStats contains execution statistics for completed jobs
 type JobStats struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
@@ -652,7 +921,7 @@ type JobStats struct {
 
 func (x *JobStats) Reset() {
 	*x = JobStats{}
-	mi := &file_proto_depin_proto_msgTypes[7]
+	mi := &file_proto_depin_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -664,7 +933,7 @@ func (x *JobStats) String() string {
 func (*JobStats) ProtoMessage() {}
 
 func (x *JobStats) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[7]
+	mi := &file_proto_depin_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -677,7 +946,7 @@ func (x *JobStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobStats.ProtoReflect.Descriptor instead.
 func (*JobStats) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{7}
+	return file_proto_depin_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *JobStats) GetPeakCpuPercent() float64 {
@@ -706,7 +975,7 @@ type ArtifactInfo struct {
 
 func (x *ArtifactInfo) Reset() {
 	*x = ArtifactInfo{}
-	mi := &file_proto_depin_proto_msgTypes[8]
+	mi := &file_proto_depin_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -718,7 +987,7 @@ func (x *ArtifactInfo) String() string {
 func (*ArtifactInfo) ProtoMessage() {}
 
 func (x *ArtifactInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[8]
+	mi := &file_proto_depin_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -731,7 +1000,7 @@ func (x *ArtifactInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactInfo.ProtoReflect.Descriptor instead.
 func (*ArtifactInfo) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{8}
+	return file_proto_depin_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ArtifactInfo) GetFilename() string {
@@ -769,7 +1038,7 @@ type JobResult struct {
 
 func (x *JobResult) Reset() {
 	*x = JobResult{}
-	mi := &file_proto_depin_proto_msgTypes[9]
+	mi := &file_proto_depin_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -781,7 +1050,7 @@ func (x *JobResult) String() string {
 func (*JobResult) ProtoMessage() {}
 
 func (x *JobResult) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[9]
+	mi := &file_proto_depin_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -794,7 +1063,7 @@ func (x *JobResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobResult.ProtoReflect.Descriptor instead.
 func (*JobResult) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{9}
+	return file_proto_depin_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *JobResult) GetJobId() string {
@@ -843,7 +1112,7 @@ type JobLog struct {
 
 func (x *JobLog) Reset() {
 	*x = JobLog{}
-	mi := &file_proto_depin_proto_msgTypes[10]
+	mi := &file_proto_depin_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -855,7 +1124,7 @@ func (x *JobLog) String() string {
 func (*JobLog) ProtoMessage() {}
 
 func (x *JobLog) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[10]
+	mi := &file_proto_depin_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -868,7 +1137,7 @@ func (x *JobLog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobLog.ProtoReflect.Descriptor instead.
 func (*JobLog) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{10}
+	return file_proto_depin_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *JobLog) GetJobId() string {
@@ -885,6 +1154,75 @@ func (x *JobLog) GetLine() string {
 	return ""
 }
 
+// ServiceStatus reports the state of a persistent service (agent -> orchestrator)
+type ServiceStatus struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`                                                                                  // Job ID of the service
+	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`                                                                                             // "starting", "healthy", "unhealthy", "stopped"
+	PortMap       map[string]int32       `protobuf:"bytes,3,rep,name=port_map,json=portMap,proto3" json:"port_map,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"` // container_port -> actual_host_port mapping
+	HealthMessage string                 `protobuf:"bytes,4,opt,name=health_message,json=healthMessage,proto3" json:"health_message,omitempty"`                                                          // Human-readable status detail
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ServiceStatus) Reset() {
+	*x = ServiceStatus{}
+	mi := &file_proto_depin_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ServiceStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ServiceStatus) ProtoMessage() {}
+
+func (x *ServiceStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_depin_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ServiceStatus.ProtoReflect.Descriptor instead.
+func (*ServiceStatus) Descriptor() ([]byte, []int) {
+	return file_proto_depin_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ServiceStatus) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
+func (x *ServiceStatus) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *ServiceStatus) GetPortMap() map[string]int32 {
+	if x != nil {
+		return x.PortMap
+	}
+	return nil
+}
+
+func (x *ServiceStatus) GetHealthMessage() string {
+	if x != nil {
+		return x.HealthMessage
+	}
+	return ""
+}
+
 // ResourceLimitsUpdate is sent from orchestrator to agent when limits change
 type ResourceLimitsUpdate struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -896,7 +1234,7 @@ type ResourceLimitsUpdate struct {
 
 func (x *ResourceLimitsUpdate) Reset() {
 	*x = ResourceLimitsUpdate{}
-	mi := &file_proto_depin_proto_msgTypes[11]
+	mi := &file_proto_depin_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -908,7 +1246,7 @@ func (x *ResourceLimitsUpdate) String() string {
 func (*ResourceLimitsUpdate) ProtoMessage() {}
 
 func (x *ResourceLimitsUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[11]
+	mi := &file_proto_depin_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -921,7 +1259,7 @@ func (x *ResourceLimitsUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceLimitsUpdate.ProtoReflect.Descriptor instead.
 func (*ResourceLimitsUpdate) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{11}
+	return file_proto_depin_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ResourceLimitsUpdate) GetLimits() *ResourceLimits {
@@ -949,7 +1287,7 @@ type HeartbeatAck struct {
 
 func (x *HeartbeatAck) Reset() {
 	*x = HeartbeatAck{}
-	mi := &file_proto_depin_proto_msgTypes[12]
+	mi := &file_proto_depin_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -961,7 +1299,7 @@ func (x *HeartbeatAck) String() string {
 func (*HeartbeatAck) ProtoMessage() {}
 
 func (x *HeartbeatAck) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[12]
+	mi := &file_proto_depin_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -974,7 +1312,7 @@ func (x *HeartbeatAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeartbeatAck.ProtoReflect.Descriptor instead.
 func (*HeartbeatAck) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{12}
+	return file_proto_depin_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *HeartbeatAck) GetReceivedTimestampMs() int64 {
@@ -991,6 +1329,59 @@ func (x *HeartbeatAck) GetSentTimestampMs() int64 {
 	return 0
 }
 
+// StopService is sent from orchestrator to agent to stop a persistent service
+type StopService struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	JobId              string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`                                           // Job ID of the service to stop
+	GracePeriodSeconds int32                  `protobuf:"varint,2,opt,name=grace_period_seconds,json=gracePeriodSeconds,proto3" json:"grace_period_seconds,omitempty"` // Time to wait before force kill (default: 30)
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *StopService) Reset() {
+	*x = StopService{}
+	mi := &file_proto_depin_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StopService) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StopService) ProtoMessage() {}
+
+func (x *StopService) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_depin_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StopService.ProtoReflect.Descriptor instead.
+func (*StopService) Descriptor() ([]byte, []int) {
+	return file_proto_depin_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *StopService) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
+func (x *StopService) GetGracePeriodSeconds() int32 {
+	if x != nil {
+		return x.GracePeriodSeconds
+	}
+	return 0
+}
+
 // ServerEvent wraps messages sent from orchestrator to agent
 type ServerEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -999,6 +1390,7 @@ type ServerEvent struct {
 	//	*ServerEvent_JobRequest
 	//	*ServerEvent_ResourceLimitsUpdate
 	//	*ServerEvent_HeartbeatAck
+	//	*ServerEvent_StopService
 	Event         isServerEvent_Event `protobuf_oneof:"event"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1006,7 +1398,7 @@ type ServerEvent struct {
 
 func (x *ServerEvent) Reset() {
 	*x = ServerEvent{}
-	mi := &file_proto_depin_proto_msgTypes[13]
+	mi := &file_proto_depin_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1018,7 +1410,7 @@ func (x *ServerEvent) String() string {
 func (*ServerEvent) ProtoMessage() {}
 
 func (x *ServerEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[13]
+	mi := &file_proto_depin_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1031,7 +1423,7 @@ func (x *ServerEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerEvent.ProtoReflect.Descriptor instead.
 func (*ServerEvent) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{13}
+	return file_proto_depin_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ServerEvent) GetEvent() isServerEvent_Event {
@@ -1068,6 +1460,15 @@ func (x *ServerEvent) GetHeartbeatAck() *HeartbeatAck {
 	return nil
 }
 
+func (x *ServerEvent) GetStopService() *StopService {
+	if x != nil {
+		if x, ok := x.Event.(*ServerEvent_StopService); ok {
+			return x.StopService
+		}
+	}
+	return nil
+}
+
 type isServerEvent_Event interface {
 	isServerEvent_Event()
 }
@@ -1084,11 +1485,17 @@ type ServerEvent_HeartbeatAck struct {
 	HeartbeatAck *HeartbeatAck `protobuf:"bytes,3,opt,name=heartbeat_ack,json=heartbeatAck,proto3,oneof"`
 }
 
+type ServerEvent_StopService struct {
+	StopService *StopService `protobuf:"bytes,4,opt,name=stop_service,json=stopService,proto3,oneof"`
+}
+
 func (*ServerEvent_JobRequest) isServerEvent_Event() {}
 
 func (*ServerEvent_ResourceLimitsUpdate) isServerEvent_Event() {}
 
 func (*ServerEvent_HeartbeatAck) isServerEvent_Event() {}
+
+func (*ServerEvent_StopService) isServerEvent_Event() {}
 
 // AgentEvent wraps messages sent from agent to orchestrator
 type AgentEvent struct {
@@ -1099,6 +1506,7 @@ type AgentEvent struct {
 	//	*AgentEvent_Heartbeat
 	//	*AgentEvent_JobResult
 	//	*AgentEvent_JobLog
+	//	*AgentEvent_ServiceStatus
 	Event         isAgentEvent_Event `protobuf_oneof:"event"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1106,7 +1514,7 @@ type AgentEvent struct {
 
 func (x *AgentEvent) Reset() {
 	*x = AgentEvent{}
-	mi := &file_proto_depin_proto_msgTypes[14]
+	mi := &file_proto_depin_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1118,7 +1526,7 @@ func (x *AgentEvent) String() string {
 func (*AgentEvent) ProtoMessage() {}
 
 func (x *AgentEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_depin_proto_msgTypes[14]
+	mi := &file_proto_depin_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1131,7 +1539,7 @@ func (x *AgentEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentEvent.ProtoReflect.Descriptor instead.
 func (*AgentEvent) Descriptor() ([]byte, []int) {
-	return file_proto_depin_proto_rawDescGZIP(), []int{14}
+	return file_proto_depin_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *AgentEvent) GetNodeId() string {
@@ -1175,6 +1583,15 @@ func (x *AgentEvent) GetJobLog() *JobLog {
 	return nil
 }
 
+func (x *AgentEvent) GetServiceStatus() *ServiceStatus {
+	if x != nil {
+		if x, ok := x.Event.(*AgentEvent_ServiceStatus); ok {
+			return x.ServiceStatus
+		}
+	}
+	return nil
+}
+
 type isAgentEvent_Event interface {
 	isAgentEvent_Event()
 }
@@ -1191,11 +1608,17 @@ type AgentEvent_JobLog struct {
 	JobLog *JobLog `protobuf:"bytes,4,opt,name=job_log,json=jobLog,proto3,oneof"` // Real-time log line from job execution
 }
 
+type AgentEvent_ServiceStatus struct {
+	ServiceStatus *ServiceStatus `protobuf:"bytes,5,opt,name=service_status,json=serviceStatus,proto3,oneof"` // Persistent service health/state update
+}
+
 func (*AgentEvent_Heartbeat) isAgentEvent_Event() {}
 
 func (*AgentEvent_JobResult) isAgentEvent_Event() {}
 
 func (*AgentEvent_JobLog) isAgentEvent_Event() {}
+
+func (*AgentEvent_ServiceStatus) isAgentEvent_Event() {}
 
 var File_proto_depin_proto protoreflect.FileDescriptor
 
@@ -1211,7 +1634,7 @@ const file_proto_depin_proto_rawDesc = "" +
 	"\amax_cpu\x18\x01 \x01(\x01R\x06maxCpu\x12\x1c\n" +
 	"\n" +
 	"max_ram_gb\x18\x02 \x01(\x01R\bmaxRamGb\x12\"\n" +
-	"\rmax_volume_gb\x18\x03 \x01(\x03R\vmaxVolumeGb\"\xde\x02\n" +
+	"\rmax_volume_gb\x18\x03 \x01(\x03R\vmaxVolumeGb\"\x83\x03\n" +
 	"\bNodeInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
 	"\tgpu_model\x18\x02 \x01(\tR\bgpuModel\x12\x1d\n" +
@@ -1226,14 +1649,26 @@ const file_proto_depin_proto_rawDesc = "" +
 	"\rdisk_total_gb\x18\n" +
 	" \x01(\x03R\vdiskTotalGb\x12\x17\n" +
 	"\aos_info\x18\v \x01(\tR\x06osInfo\x12)\n" +
-	"\bgpu_info\x18\f \x03(\v2\x0e.depin.GPUInfoR\agpuInfo\"\x88\x01\n" +
+	"\bgpu_info\x18\f \x03(\v2\x0e.depin.GPUInfoR\agpuInfo\x12#\n" +
+	"\ragent_version\x18\r \x01(\tR\fagentVersion\"\x88\x01\n" +
 	"\x14RegistrationResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12>\n" +
 	"\x0fresource_limits\x18\x03 \x01(\v2\x15.depin.ResourceLimitsR\x0eresourceLimits\"7\n" +
 	"\aJobFile\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
-	"\acontent\x18\x02 \x01(\fR\acontent\"\x80\x03\n" +
+	"\acontent\x18\x02 \x01(\fR\acontent\"\xdf\x01\n" +
+	"\vHealthCheck\x12\x1a\n" +
+	"\bendpoint\x18\x01 \x01(\tR\bendpoint\x12\x12\n" +
+	"\x04port\x18\x02 \x01(\x05R\x04port\x12)\n" +
+	"\x10interval_seconds\x18\x03 \x01(\x05R\x0fintervalSeconds\x12'\n" +
+	"\x0ftimeout_seconds\x18\x04 \x01(\x05R\x0etimeoutSeconds\x12\x18\n" +
+	"\aretries\x18\x05 \x01(\x05R\aretries\x122\n" +
+	"\x15initial_delay_seconds\x18\x06 \x01(\x05R\x13initialDelaySeconds\"m\n" +
+	"\vPortMapping\x12%\n" +
+	"\x0econtainer_port\x18\x01 \x01(\x05R\rcontainerPort\x12\x1b\n" +
+	"\thost_port\x18\x02 \x01(\x05R\bhostPort\x12\x1a\n" +
+	"\bprotocol\x18\x03 \x01(\tR\bprotocol\"\x93\x06\n" +
 	"\n" +
 	"JobRequest\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x14\n" +
@@ -1249,7 +1684,17 @@ const file_proto_depin_proto_rawDesc = "" +
 	"entrypoint\x18\n" +
 	" \x01(\tR\n" +
 	"entrypoint\x12,\n" +
-	"\x12max_artifact_bytes\x18\v \x01(\x03R\x10maxArtifactBytes\"\xe5\x02\n" +
+	"\x12max_artifact_bytes\x18\v \x01(\x03R\x10maxArtifactBytes\x125\n" +
+	"\fruntime_type\x18\f \x01(\x0e2\x12.depin.RuntimeTypeR\vruntimeType\x12D\n" +
+	"\venvironment\x18\r \x03(\v2\".depin.JobRequest.EnvironmentEntryR\venvironment\x127\n" +
+	"\rport_mappings\x18\x0e \x03(\v2\x12.depin.PortMappingR\fportMappings\x125\n" +
+	"\fhealth_check\x18\x0f \x01(\v2\x12.depin.HealthCheckR\vhealthCheck\x12\x1b\n" +
+	"\tgpu_count\x18\x10 \x01(\x05R\bgpuCount\x12\x1e\n" +
+	"\vshm_size_mb\x18\x11 \x01(\x03R\tshmSizeMb\x12'\n" +
+	"\x0finstall_command\x18\x12 \x01(\tR\x0einstallCommand\x1a>\n" +
+	"\x10EnvironmentEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x88\x03\n" +
 	"\tHeartbeat\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1f\n" +
 	"\vcpu_percent\x18\x02 \x01(\x01R\n" +
@@ -1266,7 +1711,8 @@ const file_proto_depin_proto_rawDesc = "" +
 	"\tgpu_model\x18\t \x01(\tR\bgpuModel\x12\x1c\n" +
 	"\ttimestamp\x18\n" +
 	" \x01(\tR\ttimestamp\x12*\n" +
-	"\x11sent_timestamp_ms\x18\v \x01(\x03R\x0fsentTimestampMs\"U\n" +
+	"\x11sent_timestamp_ms\x18\v \x01(\x03R\x0fsentTimestampMs\x12!\n" +
+	"\frunning_jobs\x18\f \x03(\tR\vrunningJobs\"U\n" +
 	"\bJobStats\x12(\n" +
 	"\x10peak_cpu_percent\x18\x01 \x01(\x01R\x0epeakCpuPercent\x12\x1f\n" +
 	"\vduration_ms\x18\x02 \x01(\x03R\n" +
@@ -1285,28 +1731,45 @@ const file_proto_depin_proto_rawDesc = "" +
 	"\tartifacts\x18\x05 \x03(\v2\x13.depin.ArtifactInfoR\tartifacts\"3\n" +
 	"\x06JobLog\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x12\n" +
-	"\x04line\x18\x02 \x01(\tR\x04line\"d\n" +
+	"\x04line\x18\x02 \x01(\tR\x04line\"\xdf\x01\n" +
+	"\rServiceStatus\x12\x15\n" +
+	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x16\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\x12<\n" +
+	"\bport_map\x18\x03 \x03(\v2!.depin.ServiceStatus.PortMapEntryR\aportMap\x12%\n" +
+	"\x0ehealth_message\x18\x04 \x01(\tR\rhealthMessage\x1a:\n" +
+	"\fPortMapEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01\"d\n" +
 	"\x14ResourceLimitsUpdate\x12-\n" +
 	"\x06limits\x18\x01 \x01(\v2\x15.depin.ResourceLimitsR\x06limits\x12\x1d\n" +
 	"\n" +
 	"updated_at\x18\x02 \x01(\tR\tupdatedAt\"n\n" +
 	"\fHeartbeatAck\x122\n" +
 	"\x15received_timestamp_ms\x18\x01 \x01(\x03R\x13receivedTimestampMs\x12*\n" +
-	"\x11sent_timestamp_ms\x18\x02 \x01(\x03R\x0fsentTimestampMs\"\xdd\x01\n" +
+	"\x11sent_timestamp_ms\x18\x02 \x01(\x03R\x0fsentTimestampMs\"V\n" +
+	"\vStopService\x12\x15\n" +
+	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x120\n" +
+	"\x14grace_period_seconds\x18\x02 \x01(\x05R\x12gracePeriodSeconds\"\x96\x02\n" +
 	"\vServerEvent\x124\n" +
 	"\vjob_request\x18\x01 \x01(\v2\x11.depin.JobRequestH\x00R\n" +
 	"jobRequest\x12S\n" +
 	"\x16resource_limits_update\x18\x02 \x01(\v2\x1b.depin.ResourceLimitsUpdateH\x00R\x14resourceLimitsUpdate\x12:\n" +
-	"\rheartbeat_ack\x18\x03 \x01(\v2\x13.depin.HeartbeatAckH\x00R\fheartbeatAckB\a\n" +
-	"\x05event\"\xbd\x01\n" +
+	"\rheartbeat_ack\x18\x03 \x01(\v2\x13.depin.HeartbeatAckH\x00R\fheartbeatAck\x127\n" +
+	"\fstop_service\x18\x04 \x01(\v2\x12.depin.StopServiceH\x00R\vstopServiceB\a\n" +
+	"\x05event\"\xfc\x01\n" +
 	"\n" +
 	"AgentEvent\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x120\n" +
 	"\theartbeat\x18\x02 \x01(\v2\x10.depin.HeartbeatH\x00R\theartbeat\x121\n" +
 	"\n" +
 	"job_result\x18\x03 \x01(\v2\x10.depin.JobResultH\x00R\tjobResult\x12(\n" +
-	"\ajob_log\x18\x04 \x01(\v2\r.depin.JobLogH\x00R\x06jobLogB\a\n" +
-	"\x05event2\x86\x01\n" +
+	"\ajob_log\x18\x04 \x01(\v2\r.depin.JobLogH\x00R\x06jobLog\x12=\n" +
+	"\x0eservice_status\x18\x05 \x01(\v2\x14.depin.ServiceStatusH\x00R\rserviceStatusB\a\n" +
+	"\x05event*[\n" +
+	"\vRuntimeType\x12\x12\n" +
+	"\x0eRUNTIME_SCRIPT\x10\x00\x12\x18\n" +
+	"\x14RUNTIME_DOCKER_IMAGE\x10\x01\x12\x1e\n" +
+	"\x1aRUNTIME_PERSISTENT_SERVICE\x10\x022\x86\x01\n" +
 	"\vNodeService\x12:\n" +
 	"\bRegister\x12\x0f.depin.NodeInfo\x1a\x1b.depin.RegistrationResponse\"\x00\x12;\n" +
 	"\fStreamEvents\x12\x11.depin.AgentEvent\x1a\x12.depin.ServerEvent\"\x00(\x010\x01B,Z*github.com/oHakan/depin-orchestrator/protob\x06proto3"
@@ -1323,46 +1786,61 @@ func file_proto_depin_proto_rawDescGZIP() []byte {
 	return file_proto_depin_proto_rawDescData
 }
 
-var file_proto_depin_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_proto_depin_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_proto_depin_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_proto_depin_proto_goTypes = []any{
-	(*GPUInfo)(nil),              // 0: depin.GPUInfo
-	(*ResourceLimits)(nil),       // 1: depin.ResourceLimits
-	(*NodeInfo)(nil),             // 2: depin.NodeInfo
-	(*RegistrationResponse)(nil), // 3: depin.RegistrationResponse
-	(*JobFile)(nil),              // 4: depin.JobFile
-	(*JobRequest)(nil),           // 5: depin.JobRequest
-	(*Heartbeat)(nil),            // 6: depin.Heartbeat
-	(*JobStats)(nil),             // 7: depin.JobStats
-	(*ArtifactInfo)(nil),         // 8: depin.ArtifactInfo
-	(*JobResult)(nil),            // 9: depin.JobResult
-	(*JobLog)(nil),               // 10: depin.JobLog
-	(*ResourceLimitsUpdate)(nil), // 11: depin.ResourceLimitsUpdate
-	(*HeartbeatAck)(nil),         // 12: depin.HeartbeatAck
-	(*ServerEvent)(nil),          // 13: depin.ServerEvent
-	(*AgentEvent)(nil),           // 14: depin.AgentEvent
+	(RuntimeType)(0),             // 0: depin.RuntimeType
+	(*GPUInfo)(nil),              // 1: depin.GPUInfo
+	(*ResourceLimits)(nil),       // 2: depin.ResourceLimits
+	(*NodeInfo)(nil),             // 3: depin.NodeInfo
+	(*RegistrationResponse)(nil), // 4: depin.RegistrationResponse
+	(*JobFile)(nil),              // 5: depin.JobFile
+	(*HealthCheck)(nil),          // 6: depin.HealthCheck
+	(*PortMapping)(nil),          // 7: depin.PortMapping
+	(*JobRequest)(nil),           // 8: depin.JobRequest
+	(*Heartbeat)(nil),            // 9: depin.Heartbeat
+	(*JobStats)(nil),             // 10: depin.JobStats
+	(*ArtifactInfo)(nil),         // 11: depin.ArtifactInfo
+	(*JobResult)(nil),            // 12: depin.JobResult
+	(*JobLog)(nil),               // 13: depin.JobLog
+	(*ServiceStatus)(nil),        // 14: depin.ServiceStatus
+	(*ResourceLimitsUpdate)(nil), // 15: depin.ResourceLimitsUpdate
+	(*HeartbeatAck)(nil),         // 16: depin.HeartbeatAck
+	(*StopService)(nil),          // 17: depin.StopService
+	(*ServerEvent)(nil),          // 18: depin.ServerEvent
+	(*AgentEvent)(nil),           // 19: depin.AgentEvent
+	nil,                          // 20: depin.JobRequest.EnvironmentEntry
+	nil,                          // 21: depin.ServiceStatus.PortMapEntry
 }
 var file_proto_depin_proto_depIdxs = []int32{
-	0,  // 0: depin.NodeInfo.gpu_info:type_name -> depin.GPUInfo
-	1,  // 1: depin.RegistrationResponse.resource_limits:type_name -> depin.ResourceLimits
-	4,  // 2: depin.JobRequest.files:type_name -> depin.JobFile
-	7,  // 3: depin.JobResult.stats:type_name -> depin.JobStats
-	8,  // 4: depin.JobResult.artifacts:type_name -> depin.ArtifactInfo
-	1,  // 5: depin.ResourceLimitsUpdate.limits:type_name -> depin.ResourceLimits
-	5,  // 6: depin.ServerEvent.job_request:type_name -> depin.JobRequest
-	11, // 7: depin.ServerEvent.resource_limits_update:type_name -> depin.ResourceLimitsUpdate
-	12, // 8: depin.ServerEvent.heartbeat_ack:type_name -> depin.HeartbeatAck
-	6,  // 9: depin.AgentEvent.heartbeat:type_name -> depin.Heartbeat
-	9,  // 10: depin.AgentEvent.job_result:type_name -> depin.JobResult
-	10, // 11: depin.AgentEvent.job_log:type_name -> depin.JobLog
-	2,  // 12: depin.NodeService.Register:input_type -> depin.NodeInfo
-	14, // 13: depin.NodeService.StreamEvents:input_type -> depin.AgentEvent
-	3,  // 14: depin.NodeService.Register:output_type -> depin.RegistrationResponse
-	13, // 15: depin.NodeService.StreamEvents:output_type -> depin.ServerEvent
-	14, // [14:16] is the sub-list for method output_type
-	12, // [12:14] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	1,  // 0: depin.NodeInfo.gpu_info:type_name -> depin.GPUInfo
+	2,  // 1: depin.RegistrationResponse.resource_limits:type_name -> depin.ResourceLimits
+	5,  // 2: depin.JobRequest.files:type_name -> depin.JobFile
+	0,  // 3: depin.JobRequest.runtime_type:type_name -> depin.RuntimeType
+	20, // 4: depin.JobRequest.environment:type_name -> depin.JobRequest.EnvironmentEntry
+	7,  // 5: depin.JobRequest.port_mappings:type_name -> depin.PortMapping
+	6,  // 6: depin.JobRequest.health_check:type_name -> depin.HealthCheck
+	10, // 7: depin.JobResult.stats:type_name -> depin.JobStats
+	11, // 8: depin.JobResult.artifacts:type_name -> depin.ArtifactInfo
+	21, // 9: depin.ServiceStatus.port_map:type_name -> depin.ServiceStatus.PortMapEntry
+	2,  // 10: depin.ResourceLimitsUpdate.limits:type_name -> depin.ResourceLimits
+	8,  // 11: depin.ServerEvent.job_request:type_name -> depin.JobRequest
+	15, // 12: depin.ServerEvent.resource_limits_update:type_name -> depin.ResourceLimitsUpdate
+	16, // 13: depin.ServerEvent.heartbeat_ack:type_name -> depin.HeartbeatAck
+	17, // 14: depin.ServerEvent.stop_service:type_name -> depin.StopService
+	9,  // 15: depin.AgentEvent.heartbeat:type_name -> depin.Heartbeat
+	12, // 16: depin.AgentEvent.job_result:type_name -> depin.JobResult
+	13, // 17: depin.AgentEvent.job_log:type_name -> depin.JobLog
+	14, // 18: depin.AgentEvent.service_status:type_name -> depin.ServiceStatus
+	3,  // 19: depin.NodeService.Register:input_type -> depin.NodeInfo
+	19, // 20: depin.NodeService.StreamEvents:input_type -> depin.AgentEvent
+	4,  // 21: depin.NodeService.Register:output_type -> depin.RegistrationResponse
+	18, // 22: depin.NodeService.StreamEvents:output_type -> depin.ServerEvent
+	21, // [21:23] is the sub-list for method output_type
+	19, // [19:21] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_proto_depin_proto_init() }
@@ -1370,28 +1848,31 @@ func file_proto_depin_proto_init() {
 	if File_proto_depin_proto != nil {
 		return
 	}
-	file_proto_depin_proto_msgTypes[13].OneofWrappers = []any{
+	file_proto_depin_proto_msgTypes[17].OneofWrappers = []any{
 		(*ServerEvent_JobRequest)(nil),
 		(*ServerEvent_ResourceLimitsUpdate)(nil),
 		(*ServerEvent_HeartbeatAck)(nil),
+		(*ServerEvent_StopService)(nil),
 	}
-	file_proto_depin_proto_msgTypes[14].OneofWrappers = []any{
+	file_proto_depin_proto_msgTypes[18].OneofWrappers = []any{
 		(*AgentEvent_Heartbeat)(nil),
 		(*AgentEvent_JobResult)(nil),
 		(*AgentEvent_JobLog)(nil),
+		(*AgentEvent_ServiceStatus)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_depin_proto_rawDesc), len(file_proto_depin_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   15,
+			NumEnums:      1,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_proto_depin_proto_goTypes,
 		DependencyIndexes: file_proto_depin_proto_depIdxs,
+		EnumInfos:         file_proto_depin_proto_enumTypes,
 		MessageInfos:      file_proto_depin_proto_msgTypes,
 	}.Build()
 	File_proto_depin_proto = out.File

@@ -64,6 +64,9 @@ func DefaultClientConfig() *ClientConfig {
 // The logSender should be called with each log line to stream to the orchestrator.
 type JobHandler func(ctx context.Context, req *pb.JobRequest, logSender func(string)) *pb.JobResult
 
+// StopServiceHandler is a callback for handling stop service requests.
+type StopServiceHandler func(jobID string, gracePeriodSeconds int32)
+
 // Client is the gRPC client for communicating with the Orchestrator.
 type Client struct {
 	config *ClientConfig
@@ -255,6 +258,10 @@ func (c *Client) Register(ctx context.Context, nodeInfo *pb.NodeInfo) (*pb.Regis
 // If limitsStore is provided, resource limit updates are applied to it.
 //
 // This function blocks until the context is cancelled or an error occurs.
+// ServiceStatusSender sends service status updates to the orchestrator.
+// It is exposed via StreamEvents so the job handler can report service health.
+type ServiceStatusSender func(status *pb.ServiceStatus)
+
 func (c *Client) StreamEvents(ctx context.Context, nodeInfo *pb.NodeInfo, handler JobHandler, telemetryProvider func() *pb.Heartbeat, heartbeatInterval time.Duration, limitsStore *limits.Store) error {
 	c.mu.RLock()
 	if c.client == nil {
@@ -391,6 +398,15 @@ func (c *Client) StreamEvents(ctx context.Context, nodeInfo *pb.NodeInfo, handle
 			case *pb.ServerEvent_HeartbeatAck:
 				ack := event.HeartbeatAck
 				c.handleHeartbeatAck(ack)
+
+			case *pb.ServerEvent_StopService:
+				stop := event.StopService
+				c.logger.Info("Received stop service request",
+					zap.String("job_id", stop.JobId),
+					zap.Int32("grace_period_seconds", stop.GracePeriodSeconds),
+				)
+				// StopService handling is delegated to the job handler via context cancellation
+				// The main.go service manager will handle this
 
 			default:
 				c.logger.Warn("Unknown server event type received")

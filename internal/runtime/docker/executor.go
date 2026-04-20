@@ -294,18 +294,49 @@ func (e *Executor) runHostCommand(cmd []string) (int, error) {
 	return -1, nil
 }
 
+// RuntimeType defines how the container should be executed.
+const (
+	RuntimeScript            = "SCRIPT"             // Inject script, run with interpreter (default)
+	RuntimeDockerImage       = "DOCKER_IMAGE"       // Custom image + command, no script injection assumptions
+	RuntimePersistentService = "PERSISTENT_SERVICE"  // Long-running container with health checks and port exposure
+)
+
+// PortMapping maps a container port to a host port.
+type PortMapping struct {
+	ContainerPort int    // Port inside the container
+	HostPort      int    // Port on the host (0 = auto-assign)
+	Protocol      string // "tcp" or "udp" (default: "tcp")
+}
+
+// HealthCheckConfig defines how to verify a persistent service is healthy.
+type HealthCheckConfig struct {
+	Endpoint           string // HTTP path (e.g., "/health")
+	Port               int    // Port to check
+	IntervalSeconds    int    // Check interval (default: 30)
+	TimeoutSeconds     int    // Per-check timeout (default: 5)
+	Retries            int    // Consecutive failures before unhealthy (default: 3)
+	InitialDelaySeconds int   // Wait before first check (default: 10)
+}
+
 // ContainerConfig holds resource limits, timeout settings, and dependencies for container execution.
 type ContainerConfig struct {
 	MemoryLimitMB    int64             // Memory limit in megabytes (e.g., 512 for 512MB)
 	CPULimit         float64           // CPU limit in cores (e.g., 0.5 for half core, 1.0 for one core)
 	VolumeLimitGB    int64             // Volume/disk limit in GB (0 = no limit)
-	TimeoutSeconds   int32             // Execution timeout in seconds (e.g., 60)
-	Requirements     []string          // Package dependencies to install before execution (e.g., ["numpy", "pandas==1.5.0"])
+	TimeoutSeconds   int32             // Execution timeout in seconds (0 = no timeout for services)
+	Requirements     []string          // Package dependencies to install before execution (e.g., ["numpy", "express"])
 	Script           string            // Main script content (injected as Entrypoint filename)
 	Files            map[string][]byte // Additional files to inject into /app (path -> content)
 	Entrypoint       string            // Script to execute (default: "task.py")
 	Command          []string          // Custom command override (e.g., ["node", "index.js"]). If set, Script/Entrypoint/Requirements are ignored.
 	MaxArtifactBytes int64             // Max total artifact output size in bytes (0 = no artifact collection)
+	RuntimeType      string            // Execution mode: SCRIPT, DOCKER_IMAGE, PERSISTENT_SERVICE
+	Environment      map[string]string // User-defined environment variables
+	PortMappings     []PortMapping     // Ports to expose (for PERSISTENT_SERVICE)
+	HealthCheck      *HealthCheckConfig // Health check config (for PERSISTENT_SERVICE)
+	GpuCount         int               // GPUs requested (0 = CPU only, -1 = all)
+	ShmSizeMB        int64             // Override shared memory size (0 = auto-calculate)
+	InstallCommand   string            // Custom dependency install command (e.g., "npm install")
 }
 
 // Artifact represents a file extracted from the container's /app/output/ directory.
@@ -383,13 +414,18 @@ func (e *Executor) RunContainer(ctx context.Context, imageName string, config Co
 	// Step 4: Build file map and inject into container
 	files := make(map[string][]byte)
 
-	entrypoint := config.Entrypoint
-	if entrypoint == "" {
-		entrypoint = "task.py"
+	if config.RuntimeType != RuntimeDockerImage && config.RuntimeType != RuntimePersistentService {
+		// SCRIPT mode: inject script file
+		entrypoint := config.Entrypoint
+		if entrypoint == "" {
+			entrypoint = "task.py"
+		}
+		if config.Script != "" {
+			files[entrypoint] = []byte(config.Script)
+		}
 	}
-	if config.Script != "" {
-		files[entrypoint] = []byte(config.Script)
-	}
+
+	// Inject additional files for all runtime types
 	for path, content := range config.Files {
 		files[path] = content
 	}
@@ -397,8 +433,10 @@ func (e *Executor) RunContainer(ctx context.Context, imageName string, config Co
 	// Create output directory so users can write artifacts even if they don't mkdir
 	files["output/.keep"] = []byte{}
 
-	if err := e.injectFiles(timeoutCtx, containerID, files); err != nil {
-		return nil, fmt.Errorf("failed to inject files: %w", err)
+	if len(files) > 0 {
+		if err := e.injectFiles(timeoutCtx, containerID, files); err != nil {
+			return nil, fmt.Errorf("failed to inject files: %w", err)
+		}
 	}
 
 	// Step 5: Start the container
@@ -717,34 +755,58 @@ func (e *Executor) ensureImage(ctx context.Context, imageName string) error {
 //   - User: 1000:1000 - Runs as non-root user to limit damage from container escape
 //   - Working directory set to /app where the script is injected
 func (e *Executor) createContainer(ctx context.Context, imageName string, config ContainerConfig) (string, error) {
-	// Build the container command.
-	// Three modes:
-	//   1. Custom command: User provides full command (e.g., ["node", "index.js"]) - language agnostic
-	//   2. Python with requirements: pip install + exec python entrypoint
-	//   3. Python default: python entrypoint
+	// Build the container command based on runtime type.
 	var finalCmd []string
 
-	if len(config.Command) > 0 {
-		// Mode 1: Custom command - user has full control, no Python assumptions
-		finalCmd = config.Command
-		e.logger.Debug("Using custom command", zap.Strings("command", finalCmd))
-	} else {
-		// Mode 2 & 3: Python convention (backward compatible)
-		entrypoint := config.Entrypoint
-		if entrypoint == "" {
-			entrypoint = "task.py"
+	switch config.RuntimeType {
+	case RuntimeDockerImage:
+		// DOCKER_IMAGE: User provides command, or use image's default CMD
+		if len(config.Command) > 0 {
+			finalCmd = config.Command
 		}
+		// If no command, finalCmd stays nil -> Docker uses image's default CMD/ENTRYPOINT
+		e.logger.Debug("Runtime: DOCKER_IMAGE", zap.Strings("command", finalCmd))
 
-		if len(config.Requirements) > 0 {
-			e.logger.Info("Installing dependencies before script execution",
-				zap.Strings("requirements", config.Requirements),
-			)
-			pipInstallCmd := "pip install --user --no-cache-dir " + strings.Join(config.Requirements, " ")
-			// exec replaces the shell with python so SIGTERM reaches the process directly.
-			combinedCmd := pipInstallCmd + " && exec python " + entrypoint
-			finalCmd = []string{"/bin/sh", "-c", combinedCmd}
+	case RuntimePersistentService:
+		// PERSISTENT_SERVICE: Same as DOCKER_IMAGE but with health checks (handled in RunContainer)
+		if len(config.Command) > 0 {
+			finalCmd = config.Command
+		}
+		e.logger.Debug("Runtime: PERSISTENT_SERVICE", zap.Strings("command", finalCmd))
+
+	default:
+		// SCRIPT mode (default, backward compatible):
+		//   1. Custom command override -> use it directly
+		//   2. Install command + entrypoint -> install deps then run
+		//   3. Requirements (legacy pip) + entrypoint -> pip install then run
+		//   4. Just entrypoint -> run with python
+		if len(config.Command) > 0 {
+			finalCmd = config.Command
+			e.logger.Debug("Script mode with custom command", zap.Strings("command", finalCmd))
 		} else {
-			finalCmd = []string{"python", entrypoint}
+			entrypoint := config.Entrypoint
+			if entrypoint == "" {
+				entrypoint = "task.py"
+			}
+
+			if config.InstallCommand != "" {
+				// Custom install command (e.g., "npm install", "pip install -r requirements.txt")
+				combinedCmd := config.InstallCommand + " && exec " + strings.Join(guessInterpreter(entrypoint), " ") + " " + entrypoint
+				finalCmd = []string{"/bin/sh", "-c", combinedCmd}
+				e.logger.Debug("Script mode with custom install", zap.String("install", config.InstallCommand))
+			} else if len(config.Requirements) > 0 {
+				// Legacy pip requirements (backward compatible)
+				e.logger.Info("Installing dependencies before script execution",
+					zap.Strings("requirements", config.Requirements),
+				)
+				pipInstallCmd := "pip install --user --no-cache-dir " + strings.Join(config.Requirements, " ")
+				interpreter := strings.Join(guessInterpreter(entrypoint), " ")
+				combinedCmd := pipInstallCmd + " && exec " + interpreter + " " + entrypoint
+				finalCmd = []string{"/bin/sh", "-c", combinedCmd}
+			} else {
+				interpreter := guessInterpreter(entrypoint)
+				finalCmd = append(interpreter, entrypoint)
+			}
 		}
 	}
 
@@ -753,11 +815,32 @@ func (e *Executor) createContainer(ctx context.Context, imageName string, config
 		"HOME=/tmp",
 		"PATH=/tmp/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		"VORTIX_OUTPUT_DIR=/app/output",  // Convention: write output files here for artifact collection
+		"VORTIX_RUNTIME=" + config.RuntimeType,
 	}
+
+	// Add user-defined environment variables
+	for key, val := range config.Environment {
+		// Block overriding critical system vars
+		switch strings.ToUpper(key) {
+		case "PATH", "HOME":
+			e.logger.Warn("Blocked override of system env var", zap.String("key", key))
+			continue
+		}
+		envVars = append(envVars, key+"="+val)
+	}
+
+	// Determine GPU count for this container
+	gpuCount := e.gpuCount
+	if config.GpuCount > 0 && config.GpuCount < gpuCount {
+		gpuCount = config.GpuCount
+	} else if config.GpuCount == 0 {
+		gpuCount = 0 // Explicitly CPU-only
+	}
+	// config.GpuCount == -1 means all available (keep e.gpuCount)
 
 	// Add NVIDIA env vars when GPUs are available so the container runtime
 	// knows which driver capabilities to expose and which devices to mount.
-	if e.gpuCount > 0 {
+	if gpuCount > 0 {
 		envVars = append(envVars,
 			"NVIDIA_VISIBLE_DEVICES=all",
 			"NVIDIA_DRIVER_CAPABILITIES=compute,utility",
@@ -784,13 +867,18 @@ func (e *Executor) createContainer(ctx context.Context, imageName string, config
 	memoryBytes := config.MemoryLimitMB * 1024 * 1024
 	nanoCPUs := int64(config.CPULimit * 1_000_000_000)
 
-	// Calculate SHM size: 25% of memory limit, minimum 256MB.
+	// Calculate SHM size: user override, or 25% of memory limit (minimum 256MB).
 	// PyTorch DataLoader with num_workers>0 and NCCL multi-GPU communication
 	// require significantly more than Docker's default 64MB.
-	const minShmBytes int64 = 256 * 1024 * 1024 // 256 MB
-	shmBytes := memoryBytes / 4
-	if shmBytes < minShmBytes {
-		shmBytes = minShmBytes
+	var shmBytes int64
+	if config.ShmSizeMB > 0 {
+		shmBytes = config.ShmSizeMB * 1024 * 1024
+	} else {
+		const minShmBytes int64 = 256 * 1024 * 1024 // 256 MB
+		shmBytes = memoryBytes / 4
+		if shmBytes < minShmBytes {
+			shmBytes = minShmBytes
+		}
 	}
 
 	resources := container.Resources{
@@ -799,14 +887,18 @@ func (e *Executor) createContainer(ctx context.Context, imageName string, config
 		NanoCPUs:   nanoCPUs,
 	}
 
-	// Add GPU passthrough when GPUs are available on this node.
+	// Add GPU passthrough when GPUs are requested.
 	// DeviceRequests tells the NVIDIA Container Toolkit to mount GPU devices
 	// and driver libraries into the container.
-	if e.gpuCount > 0 {
+	if gpuCount > 0 {
+		deviceCount := -1 // All available GPUs
+		if config.GpuCount > 0 {
+			deviceCount = config.GpuCount // Specific count requested
+		}
 		resources.DeviceRequests = []container.DeviceRequest{
 			{
 				Driver:       "nvidia",
-				Count:        -1, // All available GPUs
+				Count:        deviceCount,
 				Capabilities: [][]string{{"gpu"}},
 			},
 		}
@@ -1005,6 +1097,34 @@ func (e *Executor) cleanupFirewallRules() {
 	e.deleteIptablesRule(iface, isolatedNetworkGateway, "ACCEPT")
 
 	e.logger.Info("Firewall rules cleaned up")
+}
+
+// guessInterpreter returns the interpreter command for a script based on file extension.
+// This enables runtime-agnostic script execution in SCRIPT mode.
+func guessInterpreter(filename string) []string {
+	switch {
+	case strings.HasSuffix(filename, ".py"):
+		return []string{"python"}
+	case strings.HasSuffix(filename, ".js"):
+		return []string{"node"}
+	case strings.HasSuffix(filename, ".ts"):
+		return []string{"npx", "tsx"}
+	case strings.HasSuffix(filename, ".rb"):
+		return []string{"ruby"}
+	case strings.HasSuffix(filename, ".sh"):
+		return []string{"/bin/sh"}
+	case strings.HasSuffix(filename, ".R") || strings.HasSuffix(filename, ".r"):
+		return []string{"Rscript"}
+	case strings.HasSuffix(filename, ".jl"):
+		return []string{"julia"}
+	case strings.HasSuffix(filename, ".pl"):
+		return []string{"perl"}
+	case strings.HasSuffix(filename, ".lua"):
+		return []string{"lua"}
+	default:
+		// Default to python for backward compatibility
+		return []string{"python"}
+	}
 }
 
 func (e *Executor) deleteIptablesRule(iface, dest, action string) {
